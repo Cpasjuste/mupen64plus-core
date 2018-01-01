@@ -36,6 +36,7 @@
 #include "device/r4300/ops.h"
 #include "device/r4300/recomp.h"
 #include "device/r4300/recomph.h"
+#include "device/rdram/rdram.h"
 #include "main/main.h"
 
 #include <stdint.h>
@@ -260,36 +261,42 @@ void genlb(struct r4300_core* r4300)
     mov_eax_memoffs32((unsigned int *)r4300->recomp.dst->f.i.rs);
     add_eax_imm32((int)r4300->recomp.dst->f.i.immediate);
     mov_reg32_reg32(EBX, EAX);
-    if (r4300->recomp.fast_memory)
-    {
-        and_eax_imm32(0xDF800000);
-        cmp_eax_imm32(0x80000000);
-    }
-    else
-    {
+
+    /* is address in RDRAM ? */
+    and_reg32_imm32(EAX, 0xDF800000);
+    cmp_reg32_imm32(EAX, 0x80000000);
+
+    /* when fast_memory is true, we know that there is
+     * no custom read handler so skip this test entirely */
+    if (!r4300->recomp.fast_memory) {
+        /* not in RDRAM anyway so skip the read32 check */
+        jne_rj(0);
+        jump_start_rel8();
+
         shr_reg32_imm8(EAX, 16);
-        mov_reg32_preg32x4pimm32(EAX, EAX, (unsigned int)r4300->mem->readmem);
-        cmp_reg32_imm32(EAX, (unsigned int)read_rdram);
+        and_reg32_imm32(EAX, 0x1fff);
+        lea_reg32_preg32x2preg32(EAX, EAX, EAX);
+        mov_reg32_preg32x4pimm32(EAX, EAX, (unsigned int)r4300->mem->handlers[0].read32);
+        cmp_reg32_imm32(EAX, (unsigned int)read_rdram_dram);
+
+        jump_end_rel8();
     }
-    je_rj(112);
+    je_rj(95);
 
     mov_m32_imm32((unsigned int *)&(*r4300_pc_struct(r4300)), (unsigned int)(r4300->recomp.dst+1)); // 10
     /* if non RDRAM read,
      * compute shift (ECX) and address (EBX) to perform a regular read
-     * Save ECX content to memory as ECX can be overwritten when calling readmem function */
+     * Save ECX content to memory as ECX can be overwritten when calling read32 function */
     mov_reg32_reg32(ECX, EBX); // 2
     and_reg32_imm32(ECX, 3); // 6
     xor_reg32_imm32(ECX, 3); // 6
     shl_reg32_imm8(ECX, 3); // 3
     mov_m32_reg32((unsigned int *)&r4300->recomp.shift, ECX); // 6
     mov_m32_reg32((unsigned int *)(r4300_address(r4300)), EBX); // 6
-    and_reg32_imm32(EBX, ~UINT32_C(3)); // 6
     mov_m32_imm32((unsigned int *)(&r4300->rdword), (unsigned int)r4300->recomp.dst->f.i.rt); // 10
-    shr_reg32_imm8(EBX, 16); // 3
-    mov_reg32_preg32x4pimm32(EBX, EBX, (unsigned int)r4300->mem->readmem); // 7
+    mov_reg32_imm32(EBX, (unsigned int)dynarec_read_aligned_word); // 5
     call_reg32(EBX); // 2
-    mov_reg32_m32(EBX, (unsigned int *)(r4300_address(r4300))); // 6
-    and_reg32_reg32(EBX, EBX); // 2
+    and_reg32_reg32(EAX, EAX); // 2
     je_rj(51); // 2
 
     mov_reg32_m32(EAX, (unsigned int *)r4300->recomp.dst->f.i.rt); // 6
@@ -303,7 +310,7 @@ void genlb(struct r4300_core* r4300)
     /* else (RDRAM read), read byte */
     and_reg32_imm32(EBX, 0x7FFFFF); // 6
     xor_reg8_imm8(BL, 3); // 3
-    movsx_reg32_8preg32pimm32(EAX, EBX, (unsigned int)r4300->ri->rdram.dram); // 7
+    movsx_reg32_8preg32pimm32(EAX, EBX, (unsigned int)r4300->rdram->dram); // 7
 
     set_register_state(EAX, (unsigned int*)r4300->recomp.dst->f.i.rt, 1);
 #endif
@@ -320,36 +327,42 @@ void genlbu(struct r4300_core* r4300)
     mov_eax_memoffs32((unsigned int *)r4300->recomp.dst->f.i.rs);
     add_eax_imm32((int)r4300->recomp.dst->f.i.immediate);
     mov_reg32_reg32(EBX, EAX);
-    if (r4300->recomp.fast_memory)
-    {
-        and_eax_imm32(0xDF800000);
-        cmp_eax_imm32(0x80000000);
-    }
-    else
-    {
+
+    /* is address in RDRAM ? */
+    and_reg32_imm32(EAX, 0xDF800000);
+    cmp_reg32_imm32(EAX, 0x80000000);
+
+    /* when fast_memory is true, we know that there is
+     * no custom read handler so skip this test entirely */
+    if (!r4300->recomp.fast_memory) {
+        /* not in RDRAM anyway so skip the read32 check */
+        jne_rj(0);
+        jump_start_rel8();
+
         shr_reg32_imm8(EAX, 16);
-        mov_reg32_preg32x4pimm32(EAX, EAX, (unsigned int)r4300->mem->readmem);
-        cmp_reg32_imm32(EAX, (unsigned int)read_rdram);
+        and_reg32_imm32(EAX, 0x1fff);
+        lea_reg32_preg32x2preg32(EAX, EAX, EAX);
+        mov_reg32_preg32x4pimm32(EAX, EAX, (unsigned int)r4300->mem->handlers[0].read32);
+        cmp_reg32_imm32(EAX, (unsigned int)read_rdram_dram);
+
+        jump_end_rel8();
     }
-    je_rj(93);
+    je_rj(76);
 
     mov_m32_imm32((unsigned int *)&(*r4300_pc_struct(r4300)), (unsigned int)(r4300->recomp.dst+1)); // 10
     /* if non RDRAM read,
      * compute shift (ECX) and address (EBX) to perform a regular read
-     * Save ECX content to memory as ECX can be overwritten when calling readmem function */
+     * Save ECX content to memory as ECX can be overwritten when calling read32 function */
     mov_reg32_reg32(ECX, EBX); // 2
     and_reg32_imm32(ECX, 3); // 6
     xor_reg32_imm32(ECX, 3); // 6
     shl_reg32_imm8(ECX, 3); // 3
     mov_m32_reg32((unsigned int *)&r4300->recomp.shift, ECX); // 6
     mov_m32_reg32((unsigned int *)(r4300_address(r4300)), EBX); // 6
-    and_reg32_imm32(EBX, ~UINT32_C(3)); // 6
     mov_m32_imm32((unsigned int *)(&r4300->rdword), (unsigned int)r4300->recomp.dst->f.i.rt); // 10
-    shr_reg32_imm8(EBX, 16); // 3
-    mov_reg32_preg32x4pimm32(EBX, EBX, (unsigned int)r4300->mem->readmem); // 7
+    mov_reg32_imm32(EBX, (unsigned int)dynarec_read_aligned_word); // 5
     call_reg32(EBX); // 2
-    mov_reg32_m32(EBX, (unsigned int *)(r4300_address(r4300))); // 6
-    and_reg32_reg32(EBX, EBX); // 2
+    and_reg32_reg32(EAX, EAX); // 2
     je_rj(31); // 2
 
     mov_reg32_m32(EAX, (unsigned int *)r4300->recomp.dst->f.i.rt); // 6
@@ -360,7 +373,7 @@ void genlbu(struct r4300_core* r4300)
     /* else (RDRAM read), read byte */
     and_reg32_imm32(EBX, 0x7FFFFF); // 6
     xor_reg8_imm8(BL, 3); // 3
-    mov_reg32_preg32pimm32(EAX, EBX, (unsigned int)r4300->ri->rdram.dram); // 6
+    mov_reg32_preg32pimm32(EAX, EBX, (unsigned int)r4300->rdram->dram); // 6
 
     and_eax_imm32(0xFF);
 
@@ -378,36 +391,42 @@ void genlh(struct r4300_core* r4300)
     mov_eax_memoffs32((unsigned int *)r4300->recomp.dst->f.i.rs);
     add_eax_imm32((int)r4300->recomp.dst->f.i.immediate);
     mov_reg32_reg32(EBX, EAX);
-    if (r4300->recomp.fast_memory)
-    {
-        and_eax_imm32(0xDF800000);
-        cmp_eax_imm32(0x80000000);
-    }
-    else
-    {
+
+    /* is address in RDRAM ? */
+    and_reg32_imm32(EAX, 0xDF800000);
+    cmp_reg32_imm32(EAX, 0x80000000);
+
+    /* when fast_memory is true, we know that there is
+     * no custom read handler so skip this test entirely */
+    if (!r4300->recomp.fast_memory) {
+        /* not in RDRAM anyway so skip the read32 check */
+        jne_rj(0);
+        jump_start_rel8();
+
         shr_reg32_imm8(EAX, 16);
-        mov_reg32_preg32x4pimm32(EAX, EAX, (unsigned int)r4300->mem->readmem);
-        cmp_reg32_imm32(EAX, (unsigned int)read_rdram);
+        and_reg32_imm32(EAX, 0x1fff);
+        lea_reg32_preg32x2preg32(EAX, EAX, EAX);
+        mov_reg32_preg32x4pimm32(EAX, EAX, (unsigned int)r4300->mem->handlers[0].read32);
+        cmp_reg32_imm32(EAX, (unsigned int)read_rdram_dram);
+
+        jump_end_rel8();
     }
-    je_rj(112);
+    je_rj(95);
 
     mov_m32_imm32((unsigned int *)&(*r4300_pc_struct(r4300)), (unsigned int)(r4300->recomp.dst+1)); // 10
     /* if non RDRAM read,
      * compute shift (ECX) and address (EBX) to perform a regular read
-     * Save ECX content to memory as ECX can be overwritten when calling readmem function */
+     * Save ECX content to memory as ECX can be overwritten when calling read32 function */
     mov_reg32_reg32(ECX, EBX); // 2
     and_reg32_imm32(ECX, 2); // 6
     xor_reg32_imm32(ECX, 2); // 6
     shl_reg32_imm8(ECX, 3); // 3
     mov_m32_reg32((unsigned int *)&r4300->recomp.shift, ECX); // 6
     mov_m32_reg32((unsigned int *)(r4300_address(r4300)), EBX); // 6
-    and_reg32_imm32(EBX, ~UINT32_C(3)); // 6
     mov_m32_imm32((unsigned int *)(&r4300->rdword), (unsigned int)r4300->recomp.dst->f.i.rt); // 10
-    shr_reg32_imm8(EBX, 16); // 3
-    mov_reg32_preg32x4pimm32(EBX, EBX, (unsigned int)r4300->mem->readmem); // 7
+    mov_reg32_imm32(EBX, (unsigned int)dynarec_read_aligned_word); // 5
     call_reg32(EBX); // 2
-    mov_reg32_m32(EBX, (unsigned int *)(r4300_address(r4300))); // 6
-    and_reg32_reg32(EBX, EBX); // 2
+    and_reg32_reg32(EAX, EAX); // 2
     je_rj(51); // 2
 
     mov_reg32_m32(EAX, (unsigned int *)r4300->recomp.dst->f.i.rt); // 6
@@ -421,7 +440,7 @@ void genlh(struct r4300_core* r4300)
     /* else (RDRAM read), read hword */
     and_reg32_imm32(EBX, 0x7FFFFF); // 6
     xor_reg8_imm8(BL, 2); // 3
-    movsx_reg32_16preg32pimm32(EAX, EBX, (unsigned int)r4300->ri->rdram.dram); // 7
+    movsx_reg32_16preg32pimm32(EAX, EBX, (unsigned int)r4300->rdram->dram); // 7
 
     set_register_state(EAX, (unsigned int*)r4300->recomp.dst->f.i.rt, 1);
 #endif
@@ -438,36 +457,42 @@ void genlhu(struct r4300_core* r4300)
     mov_eax_memoffs32((unsigned int *)r4300->recomp.dst->f.i.rs);
     add_eax_imm32((int)r4300->recomp.dst->f.i.immediate);
     mov_reg32_reg32(EBX, EAX);
-    if (r4300->recomp.fast_memory)
-    {
-        and_eax_imm32(0xDF800000);
-        cmp_eax_imm32(0x80000000);
-    }
-    else
-    {
+
+    /* is address in RDRAM ? */
+    and_reg32_imm32(EAX, 0xDF800000);
+    cmp_reg32_imm32(EAX, 0x80000000);
+
+    /* when fast_memory is true, we know that there is
+     * no custom read handler so skip this test entirely */
+    if (!r4300->recomp.fast_memory) {
+        /* not in RDRAM anyway so skip the read32 check */
+        jne_rj(0);
+        jump_start_rel8();
+
         shr_reg32_imm8(EAX, 16);
-        mov_reg32_preg32x4pimm32(EAX, EAX, (unsigned int)r4300->mem->readmem);
-        cmp_reg32_imm32(EAX, (unsigned int)read_rdram);
+        and_reg32_imm32(EAX, 0x1fff);
+        lea_reg32_preg32x2preg32(EAX, EAX, EAX);
+        mov_reg32_preg32x4pimm32(EAX, EAX, (unsigned int)r4300->mem->handlers[0].read32);
+        cmp_reg32_imm32(EAX, (unsigned int)read_rdram_dram);
+
+        jump_end_rel8();
     }
-    je_rj(93);
+    je_rj(76);
 
     mov_m32_imm32((unsigned int *)&(*r4300_pc_struct(r4300)), (unsigned int)(r4300->recomp.dst+1)); // 10
     /* if non RDRAM read,
      * compute shift (ECX) and address (EBX) to perform a regular read
-     * Save ECX content to memory as ECX can be overwritten when calling readmem function */
+     * Save ECX content to memory as ECX can be overwritten when calling read32 function */
     mov_reg32_reg32(ECX, EBX); // 2
     and_reg32_imm32(ECX, 2); // 6
     xor_reg32_imm32(ECX, 2); // 6
     shl_reg32_imm8(ECX, 3); // 3
     mov_m32_reg32((unsigned int *)&r4300->recomp.shift, ECX); // 6
     mov_m32_reg32((unsigned int *)(r4300_address(r4300)), EBX); // 6
-    and_reg32_imm32(EBX, ~UINT32_C(3)); // 6
     mov_m32_imm32((unsigned int *)(&r4300->rdword), (unsigned int)r4300->recomp.dst->f.i.rt); // 10
-    shr_reg32_imm8(EBX, 16); // 3
-    mov_reg32_preg32x4pimm32(EBX, EBX, (unsigned int)r4300->mem->readmem); // 7
+    mov_reg32_imm32(EBX, (unsigned int)dynarec_read_aligned_word); // 5
     call_reg32(EBX); // 2
-    mov_reg32_m32(EBX, (unsigned int *)(r4300_address(r4300))); // 6
-    and_reg32_reg32(EBX, EBX); // 2
+    and_reg32_reg32(EAX, EAX); // 2
     je_rj(31); // 2
 
     mov_reg32_m32(EAX, (unsigned int *)r4300->recomp.dst->f.i.rt); // 6
@@ -478,7 +503,7 @@ void genlhu(struct r4300_core* r4300)
     /* else (RDRAM read), read hword */
     and_reg32_imm32(EBX, 0x7FFFFF); // 6
     xor_reg8_imm8(BL, 2); // 3
-    mov_reg32_preg32pimm32(EAX, EBX, (unsigned int)r4300->ri->rdram.dram); // 6
+    mov_reg32_preg32pimm32(EAX, EBX, (unsigned int)r4300->rdram->dram); // 6
 
     and_eax_imm32(0xFFFF);
 
@@ -501,30 +526,38 @@ void genlw(struct r4300_core* r4300)
     mov_eax_memoffs32((unsigned int *)r4300->recomp.dst->f.i.rs);
     add_eax_imm32((int)r4300->recomp.dst->f.i.immediate);
     mov_reg32_reg32(EBX, EAX);
-    if (r4300->recomp.fast_memory)
-    {
-        and_eax_imm32(0xDF800000);
-        cmp_eax_imm32(0x80000000);
-    }
-    else
-    {
+
+    /* is address in RDRAM ? */
+    and_reg32_imm32(EAX, 0xDF800000);
+    cmp_reg32_imm32(EAX, 0x80000000);
+
+    /* when fast_memory is true, we know that there is
+     * no custom read handler so skip this test entirely */
+    if (!r4300->recomp.fast_memory) {
+        /* not in RDRAM anyway so skip the read32 check */
+        jne_rj(0);
+        jump_start_rel8();
+
         shr_reg32_imm8(EAX, 16);
-        mov_reg32_preg32x4pimm32(EAX, EAX, (unsigned int)r4300->mem->readmem);
-        cmp_reg32_imm32(EAX, (unsigned int)read_rdram);
+        and_reg32_imm32(EAX, 0x1fff);
+        lea_reg32_preg32x2preg32(EAX, EAX, EAX);
+        mov_reg32_preg32x4pimm32(EAX, EAX, (unsigned int)r4300->mem->handlers[0].read32);
+        cmp_reg32_imm32(EAX, (unsigned int)read_rdram_dram);
+
+        jump_end_rel8();
     }
-    je_rj(45);
+    je_rj(40);
 
     mov_m32_imm32((unsigned int *)&(*r4300_pc_struct(r4300)), (unsigned int)(r4300->recomp.dst+1)); // 10
     mov_m32_reg32((unsigned int *)(r4300_address(r4300)), EBX); // 6
     mov_m32_imm32((unsigned int *)(&r4300->rdword), (unsigned int)r4300->recomp.dst->f.i.rt); // 10
-    shr_reg32_imm8(EBX, 16); // 3
-    mov_reg32_preg32x4pimm32(EBX, EBX, (unsigned int)r4300->mem->readmem); // 7
+    mov_reg32_imm32(EBX, (unsigned int)dynarec_read_aligned_word); // 5
     call_reg32(EBX); // 2
     mov_eax_memoffs32((unsigned int *)(r4300->recomp.dst->f.i.rt)); // 5
     jmp_imm_short(12); // 2
 
     and_reg32_imm32(EBX, 0x7FFFFF); // 6
-    mov_reg32_preg32pimm32(EAX, EBX, (unsigned int)r4300->ri->rdram.dram); // 6
+    mov_reg32_preg32pimm32(EAX, EBX, (unsigned int)r4300->rdram->dram); // 6
 
     set_register_state(EAX, (unsigned int*)r4300->recomp.dst->f.i.rt, 1);
 #endif
@@ -540,30 +573,38 @@ void genlwu(struct r4300_core* r4300)
     mov_eax_memoffs32((unsigned int *)r4300->recomp.dst->f.i.rs);
     add_eax_imm32((int)r4300->recomp.dst->f.i.immediate);
     mov_reg32_reg32(EBX, EAX);
-    if (r4300->recomp.fast_memory)
-    {
-        and_eax_imm32(0xDF800000);
-        cmp_eax_imm32(0x80000000);
-    }
-    else
-    {
+
+    /* is address in RDRAM ? */
+    and_reg32_imm32(EAX, 0xDF800000);
+    cmp_reg32_imm32(EAX, 0x80000000);
+
+    /* when fast_memory is true, we know that there is
+     * no custom read handler so skip this test entirely */
+    if (!r4300->recomp.fast_memory) {
+        /* not in RDRAM anyway so skip the read32 check */
+        jne_rj(0);
+        jump_start_rel8();
+
         shr_reg32_imm8(EAX, 16);
-        mov_reg32_preg32x4pimm32(EAX, EAX, (unsigned int)r4300->mem->readmem);
-        cmp_reg32_imm32(EAX, (unsigned int)read_rdram);
+        and_reg32_imm32(EAX, 0x1fff);
+        lea_reg32_preg32x2preg32(EAX, EAX, EAX);
+        mov_reg32_preg32x4pimm32(EAX, EAX, (unsigned int)r4300->mem->handlers[0].read32);
+        cmp_reg32_imm32(EAX, (unsigned int)read_rdram_dram);
+
+        jump_end_rel8();
     }
-    je_rj(45);
+    je_rj(40);
 
     mov_m32_imm32((unsigned int *)(&(*r4300_pc_struct(r4300))), (unsigned int)(r4300->recomp.dst+1)); // 10
     mov_m32_reg32((unsigned int *)(r4300_address(r4300)), EBX); // 6
     mov_m32_imm32((unsigned int *)(&r4300->rdword), (unsigned int)r4300->recomp.dst->f.i.rt); // 10
-    shr_reg32_imm8(EBX, 16); // 3
-    mov_reg32_preg32x4pimm32(EBX, EBX, (unsigned int)r4300->mem->readmem); // 7
+    mov_reg32_imm32(EBX, (unsigned int)dynarec_read_aligned_word); // 5
     call_reg32(EBX); // 2
     mov_eax_memoffs32((unsigned int *)(r4300->recomp.dst->f.i.rt)); // 5
     jmp_imm_short(12); // 2
 
     and_reg32_imm32(EBX, 0x7FFFFF); // 6
-    mov_reg32_preg32pimm32(EAX, EBX, (unsigned int)r4300->ri->rdram.dram); // 6
+    mov_reg32_preg32pimm32(EAX, EBX, (unsigned int)r4300->rdram->dram); // 6
 
     xor_reg32_reg32(EBX, EBX);
 
@@ -591,32 +632,40 @@ void genld(struct r4300_core* r4300)
     mov_eax_memoffs32((unsigned int *)r4300->recomp.dst->f.i.rs);
     add_eax_imm32((int)r4300->recomp.dst->f.i.immediate);
     mov_reg32_reg32(EBX, EAX);
-    if (r4300->recomp.fast_memory)
-    {
-        and_eax_imm32(0xDF800000);
-        cmp_eax_imm32(0x80000000);
-    }
-    else
-    {
+
+    /* is address in RDRAM ? */
+    and_reg32_imm32(EAX, 0xDF800000);
+    cmp_reg32_imm32(EAX, 0x80000000);
+
+    /* when fast_memory is true, we know that there is
+     * no custom read handler so skip this test entirely */
+    if (!r4300->recomp.fast_memory) {
+        /* not in RDRAM anyway so skip the read32 check */
+        jne_rj(0);
+        jump_start_rel8();
+
         shr_reg32_imm8(EAX, 16);
-        mov_reg32_preg32x4pimm32(EAX, EAX, (unsigned int)r4300->mem->readmemd);
-        cmp_reg32_imm32(EAX, (unsigned int)read_rdramd);
+        and_reg32_imm32(EAX, 0x1fff);
+        lea_reg32_preg32x2preg32(EAX, EAX, EAX);
+        mov_reg32_preg32x4pimm32(EAX, EAX, (unsigned int)r4300->mem->handlers[0].read32);
+        cmp_reg32_imm32(EAX, (unsigned int)read_rdram_dram);
+
+        jump_end_rel8();
     }
-    je_rj(51);
+    je_rj(46);
 
     mov_m32_imm32((unsigned int *)(&(*r4300_pc_struct(r4300))), (unsigned int)(r4300->recomp.dst+1)); // 10
     mov_m32_reg32((unsigned int *)(r4300_address(r4300)), EBX); // 6
     mov_m32_imm32((unsigned int *)(&r4300->rdword), (unsigned int)r4300->recomp.dst->f.i.rt); // 10
-    shr_reg32_imm8(EBX, 16); // 3
-    mov_reg32_preg32x4pimm32(EBX, EBX, (unsigned int)r4300->mem->readmemd); // 7
+    mov_reg32_imm32(EBX, (unsigned int)dynarec_read_aligned_dword); // 5
     call_reg32(EBX); // 2
     mov_eax_memoffs32((unsigned int *)(r4300->recomp.dst->f.i.rt)); // 5
     mov_reg32_m32(ECX, (unsigned int *)(r4300->recomp.dst->f.i.rt)+1); // 6
     jmp_imm_short(18); // 2
 
     and_reg32_imm32(EBX, 0x7FFFFF); // 6
-    mov_reg32_preg32pimm32(EAX, EBX, ((unsigned int)r4300->ri->rdram.dram)+4); // 6
-    mov_reg32_preg32pimm32(ECX, EBX, ((unsigned int)r4300->ri->rdram.dram)); // 6
+    mov_reg32_preg32pimm32(EAX, EBX, ((unsigned int)r4300->rdram->dram)+4); // 6
+    mov_reg32_preg32pimm32(ECX, EBX, ((unsigned int)r4300->rdram->dram)); // 6
 
     set_64_register_state(EAX, ECX, (unsigned int*)r4300->recomp.dst->f.i.rt, 1);
 #endif
@@ -649,18 +698,27 @@ void gensb(struct r4300_core* r4300)
     mov_eax_memoffs32((unsigned int *)r4300->recomp.dst->f.i.rs);
     add_eax_imm32((int)r4300->recomp.dst->f.i.immediate);
     mov_reg32_reg32(EBX, EAX);
-    if (r4300->recomp.fast_memory)
-    {
-        and_eax_imm32(0xDF800000);
-        cmp_eax_imm32(0x80000000);
-    }
-    else
-    {
+
+    /* is address in RDRAM ? */
+    and_reg32_imm32(EAX, 0xDF800000);
+    cmp_reg32_imm32(EAX, 0x80000000);
+
+    /* when fast_memory is true, we know that there is
+     * no custom read handler so skip this test entirely */
+    if (!r4300->recomp.fast_memory) {
+        /* not in RDRAM anyway so skip the read32 check */
+        jne_rj(0);
+        jump_start_rel8();
+
         shr_reg32_imm8(EAX, 16);
-        mov_reg32_preg32x4pimm32(EAX, EAX, (unsigned int)r4300->mem->writemem);
-        cmp_reg32_imm32(EAX, (unsigned int)write_rdram);
+        and_reg32_imm32(EAX, 0x1fff);
+        lea_reg32_preg32x2preg32(EAX, EAX, EAX);
+        mov_reg32_preg32x4pimm32(EAX, EAX, (unsigned int)r4300->mem->handlers[0].write32);
+        cmp_reg32_imm32(EAX, (unsigned int)write_rdram_dram);
+
+        jump_end_rel8();
     }
-    je_rj(79);
+    je_rj(68);
 
     mov_m32_imm32((unsigned int *)(&(*r4300_pc_struct(r4300))), (unsigned int)(r4300->recomp.dst+1)); // 10
     /* if non RDRAM write,
@@ -670,14 +728,12 @@ void gensb(struct r4300_core* r4300)
     xor_reg32_imm32(ECX, 3); // 6
     shl_reg32_imm8(ECX, 3); // 3
     mov_m32_reg32((unsigned int *)(r4300_address(r4300)), EBX); // 6
-    and_reg32_imm32(EBX, ~UINT32_C(3)); // 6
     shl_reg32_cl(EDX); // 2
     mov_m32_reg32((unsigned int *)(r4300_wword(r4300)), EDX); // 6
     mov_reg32_imm32(EDX, 0xff); // 5
     shl_reg32_cl(EDX); // 2
     mov_m32_reg32((unsigned int *)(r4300_wmask(r4300)), EDX); // 6
-    shr_reg32_imm8(EBX, 16); // 3
-    mov_reg32_preg32x4pimm32(EBX, EBX, (unsigned int)r4300->mem->writemem); // 7
+    mov_reg32_imm32(EBX, (unsigned int)dynarec_write_aligned_word); // 5
     call_reg32(EBX); // 2
     mov_eax_memoffs32((unsigned int *)(r4300_address(r4300))); // 5
     jmp_imm_short(17); // 2
@@ -686,7 +742,7 @@ void gensb(struct r4300_core* r4300)
     mov_reg32_reg32(EAX, EBX); // 2
     and_reg32_imm32(EBX, 0x7FFFFF); // 6
     xor_reg8_imm8(BL, 3); // 3
-    mov_preg32pimm32_reg8(EBX, (unsigned int)r4300->ri->rdram.dram, DL); // 6
+    mov_preg32pimm32_reg8(EBX, (unsigned int)r4300->rdram->dram, DL); // 6
 
     mov_reg32_reg32(EBX, EAX);
     shr_reg32_imm8(EBX, 12);
@@ -723,18 +779,27 @@ void gensh(struct r4300_core* r4300)
     mov_eax_memoffs32((unsigned int *)r4300->recomp.dst->f.i.rs);
     add_eax_imm32((int)r4300->recomp.dst->f.i.immediate);
     mov_reg32_reg32(EBX, EAX);
-    if (r4300->recomp.fast_memory)
-    {
-        and_eax_imm32(0xDF800000);
-        cmp_eax_imm32(0x80000000);
-    }
-    else
-    {
+
+    /* is address in RDRAM ? */
+    and_reg32_imm32(EAX, 0xDF800000);
+    cmp_reg32_imm32(EAX, 0x80000000);
+
+    /* when fast_memory is true, we know that there is
+     * no custom read handler so skip this test entirely */
+    if (!r4300->recomp.fast_memory) {
+        /* not in RDRAM anyway so skip the read32 check */
+        jne_rj(0);
+        jump_start_rel8();
+
         shr_reg32_imm8(EAX, 16);
-        mov_reg32_preg32x4pimm32(EAX, EAX, (unsigned int)r4300->mem->writemem);
-        cmp_reg32_imm32(EAX, (unsigned int)write_rdram);
+        and_reg32_imm32(EAX, 0x1fff);
+        lea_reg32_preg32x2preg32(EAX, EAX, EAX);
+        mov_reg32_preg32x4pimm32(EAX, EAX, (unsigned int)r4300->mem->handlers[0].write32);
+        cmp_reg32_imm32(EAX, (unsigned int)write_rdram_dram);
+
+        jump_end_rel8();
     }
-    je_rj(79);
+    je_rj(68);
 
     mov_m32_imm32((unsigned int *)(&(*r4300_pc_struct(r4300))), (unsigned int)(r4300->recomp.dst+1)); // 10
     /* if non RDRAM write,
@@ -744,14 +809,12 @@ void gensh(struct r4300_core* r4300)
     xor_reg32_imm32(ECX, 2); // 6
     shl_reg32_imm8(ECX, 3); // 3
     mov_m32_reg32((unsigned int *)(r4300_address(r4300)), EBX); // 6
-    and_reg32_imm32(EBX, ~UINT32_C(3)); // 6
     shl_reg32_cl(EDX); // 2
     mov_m32_reg32((unsigned int *)(r4300_wword(r4300)), EDX); // 6
     mov_reg32_imm32(EDX, 0xffff); // 5
     shl_reg32_cl(EDX); // 2
     mov_m32_reg32((unsigned int *)(r4300_wmask(r4300)), EDX); // 6
-    shr_reg32_imm8(EBX, 16); // 3
-    mov_reg32_preg32x4pimm32(EBX, EBX, (unsigned int)r4300->mem->writemem); // 7
+    mov_reg32_imm32(EBX, (unsigned int)dynarec_write_aligned_word); // 5
     call_reg32(EBX); // 2
     mov_eax_memoffs32((unsigned int *)(r4300_address(r4300))); // 5
     jmp_imm_short(18); // 2
@@ -760,7 +823,7 @@ void gensh(struct r4300_core* r4300)
     mov_reg32_reg32(EAX, EBX); // 2
     and_reg32_imm32(EBX, 0x7FFFFF); // 6
     xor_reg8_imm8(BL, 2); // 3
-    mov_preg32pimm32_reg16(EBX, (unsigned int)r4300->ri->rdram.dram, DX); // 7
+    mov_preg32pimm32_reg16(EBX, (unsigned int)r4300->rdram->dram, DX); // 7
 
     mov_reg32_reg32(EBX, EAX);
     shr_reg32_imm8(EBX, 12);
@@ -797,32 +860,40 @@ void gensw(struct r4300_core* r4300)
     mov_eax_memoffs32((unsigned int *)r4300->recomp.dst->f.i.rs);
     add_eax_imm32((int)r4300->recomp.dst->f.i.immediate);
     mov_reg32_reg32(EBX, EAX);
-    if (r4300->recomp.fast_memory)
-    {
-        and_eax_imm32(0xDF800000);
-        cmp_eax_imm32(0x80000000);
-    }
-    else
-    {
+
+    /* is address in RDRAM ? */
+    and_reg32_imm32(EAX, 0xDF800000);
+    cmp_reg32_imm32(EAX, 0x80000000);
+
+    /* when fast_memory is true, we know that there is
+     * no custom read handler so skip this test entirely */
+    if (!r4300->recomp.fast_memory) {
+        /* not in RDRAM anyway so skip the read32 check */
+        jne_rj(0);
+        jump_start_rel8();
+
         shr_reg32_imm8(EAX, 16);
-        mov_reg32_preg32x4pimm32(EAX, EAX, (unsigned int)r4300->mem->writemem);
-        cmp_reg32_imm32(EAX, (unsigned int)write_rdram);
+        and_reg32_imm32(EAX, 0x1fff);
+        lea_reg32_preg32x2preg32(EAX, EAX, EAX);
+        mov_reg32_preg32x4pimm32(EAX, EAX, (unsigned int)r4300->mem->handlers[0].write32);
+        cmp_reg32_imm32(EAX, (unsigned int)write_rdram_dram);
+
+        jump_end_rel8();
     }
-    je_rj(51);
+    je_rj(46);
 
     mov_m32_imm32((unsigned int *)(&(*r4300_pc_struct(r4300))), (unsigned int)(r4300->recomp.dst+1)); // 10
     mov_m32_reg32((unsigned int *)(r4300_address(r4300)), EBX); // 6
     mov_m32_reg32((unsigned int *)(r4300_wword(r4300)), ECX); // 6
     mov_m32_imm32((unsigned int *)(r4300_wmask(r4300)), ~UINT32_C(0)); // 10
-    shr_reg32_imm8(EBX, 16); // 3
-    mov_reg32_preg32x4pimm32(EBX, EBX, (unsigned int)r4300->mem->writemem); // 7
+    mov_reg32_imm32(EBX, (unsigned int)dynarec_write_aligned_word); // 5
     call_reg32(EBX); // 2
     mov_eax_memoffs32((unsigned int *)(r4300_address(r4300))); // 5
     jmp_imm_short(14); // 2
 
     mov_reg32_reg32(EAX, EBX); // 2
     and_reg32_imm32(EBX, 0x7FFFFF); // 6
-    mov_preg32pimm32_reg32(EBX, (unsigned int)r4300->ri->rdram.dram, ECX); // 6
+    mov_preg32pimm32_reg32(EBX, (unsigned int)r4300->rdram->dram, ECX); // 6
 
     mov_reg32_reg32(EBX, EAX);
     shr_reg32_imm8(EBX, 12);
@@ -866,33 +937,41 @@ void gensd(struct r4300_core* r4300)
     mov_eax_memoffs32((unsigned int *)r4300->recomp.dst->f.i.rs);
     add_eax_imm32((int)r4300->recomp.dst->f.i.immediate);
     mov_reg32_reg32(EBX, EAX);
-    if (r4300->recomp.fast_memory)
-    {
-        and_eax_imm32(0xDF800000);
-        cmp_eax_imm32(0x80000000);
-    }
-    else
-    {
+
+    /* is address in RDRAM ? */
+    and_reg32_imm32(EAX, 0xDF800000);
+    cmp_reg32_imm32(EAX, 0x80000000);
+
+    /* when fast_memory is true, we know that there is
+     * no custom read handler so skip this test entirely */
+    if (!r4300->recomp.fast_memory) {
+        /* not in RDRAM anyway so skip the read32 check */
+        jne_rj(0);
+        jump_start_rel8();
+
         shr_reg32_imm8(EAX, 16);
-        mov_reg32_preg32x4pimm32(EAX, EAX, (unsigned int)r4300->mem->writememd);
-        cmp_reg32_imm32(EAX, (unsigned int)write_rdramd);
+        and_reg32_imm32(EAX, 0x1fff);
+        lea_reg32_preg32x2preg32(EAX, EAX, EAX);
+        mov_reg32_preg32x4pimm32(EAX, EAX, (unsigned int)r4300->mem->handlers[0].write32);
+        cmp_reg32_imm32(EAX, (unsigned int)write_rdram_dram);
+
+        jump_end_rel8();
     }
-    je_rj(47);
+    je_rj(42);
 
     mov_m32_imm32((unsigned int *)(&(*r4300_pc_struct(r4300))), (unsigned int)(r4300->recomp.dst+1)); // 10
     mov_m32_reg32((unsigned int *)(r4300_address(r4300)), EBX); // 6
     mov_m32_reg32((unsigned int *)(r4300_wdword(r4300)), ECX); // 6
     mov_m32_reg32((unsigned int *)(r4300_wdword(r4300))+1, EDX); // 6
-    shr_reg32_imm8(EBX, 16); // 3
-    mov_reg32_preg32x4pimm32(EBX, EBX, (unsigned int)r4300->mem->writememd); // 7
+    mov_reg32_imm32(EBX, (unsigned int)dynarec_write_aligned_dword); // 5
     call_reg32(EBX); // 2
     mov_eax_memoffs32((unsigned int *)(r4300_address(r4300))); // 5
     jmp_imm_short(20); // 2
 
     mov_reg32_reg32(EAX, EBX); // 2
     and_reg32_imm32(EBX, 0x7FFFFF); // 6
-    mov_preg32pimm32_reg32(EBX, ((unsigned int)r4300->ri->rdram.dram)+4, ECX); // 6
-    mov_preg32pimm32_reg32(EBX, ((unsigned int)r4300->ri->rdram.dram)+0, EDX); // 6
+    mov_preg32pimm32_reg32(EBX, ((unsigned int)r4300->rdram->dram)+4, ECX); // 6
+    mov_preg32pimm32_reg32(EBX, ((unsigned int)r4300->rdram->dram)+0, EDX); // 6
 
     mov_reg32_reg32(EBX, EAX);
     shr_reg32_imm8(EBX, 12);
@@ -4097,22 +4176,22 @@ void genlwc1(struct r4300_core* r4300)
     else
     {
         shr_reg32_imm8(EAX, 16);
-        mov_reg32_preg32x4pimm32(EAX, EAX, (unsigned int)r4300->mem->readmem);
-        cmp_reg32_imm32(EAX, (unsigned int)read_rdram);
+        lea_reg32_preg32x2preg32(EAX, EAX, EAX);
+        mov_reg32_preg32x4pimm32(EAX, EAX, (unsigned int)r4300->mem->handlers[0].read32);
+        cmp_reg32_imm32(EAX, (unsigned int)read_rdram_dram);
     }
-    je_rj(42);
+    je_rj(37);
 
     mov_m32_imm32((unsigned int *)(&(*r4300_pc_struct(r4300))), (unsigned int)(r4300->recomp.dst+1)); // 10
     mov_m32_reg32((unsigned int *)(r4300_address(r4300)), EBX); // 6
     mov_reg32_m32(EDX, (unsigned int*)(&(r4300_cp1_regs_simple(&r4300->cp1))[r4300->recomp.dst->f.lf.ft])); // 6
     mov_m32_reg32((unsigned int *)(&r4300->rdword), EDX); // 6
-    shr_reg32_imm8(EBX, 16); // 3
-    mov_reg32_preg32x4pimm32(EBX, EBX, (unsigned int)r4300->mem->readmem); // 7
+    mov_reg32_imm32(EBX, (unsigned int)dynarec_read_aligned_word); // 5
     call_reg32(EBX); // 2
     jmp_imm_short(20); // 2
 
     and_reg32_imm32(EBX, 0x7FFFFF); // 6
-    mov_reg32_preg32pimm32(EAX, EBX, (unsigned int)r4300->ri->rdram.dram); // 6
+    mov_reg32_preg32pimm32(EAX, EBX, (unsigned int)r4300->rdram->dram); // 6
     mov_reg32_m32(EBX, (unsigned int*)(&(r4300_cp1_regs_simple(&r4300->cp1))[r4300->recomp.dst->f.lf.ft])); // 6
     mov_preg32_reg32(EBX, EAX); // 2
 #endif
@@ -4136,23 +4215,23 @@ void genldc1(struct r4300_core* r4300)
     else
     {
         shr_reg32_imm8(EAX, 16);
-        mov_reg32_preg32x4pimm32(EAX, EAX, (unsigned int)r4300->mem->readmemd);
-        cmp_reg32_imm32(EAX, (unsigned int)read_rdramd);
+        lea_reg32_preg32x2preg32(EAX, EAX, EAX);
+        mov_reg32_preg32x4pimm32(EAX, EAX, (unsigned int)r4300->mem->handlers[0].read32);
+        cmp_reg32_imm32(EAX, (unsigned int)read_rdram_dram);
     }
-    je_rj(42);
+    je_rj(37);
 
     mov_m32_imm32((unsigned int *)(&(*r4300_pc_struct(r4300))), (unsigned int)(r4300->recomp.dst+1)); // 10
     mov_m32_reg32((unsigned int *)(r4300_address(r4300)), EBX); // 6
     mov_reg32_m32(EDX, (unsigned int*)(&(r4300_cp1_regs_double(&r4300->cp1))[r4300->recomp.dst->f.lf.ft])); // 6
     mov_m32_reg32((unsigned int *)(&r4300->rdword), EDX); // 6
-    shr_reg32_imm8(EBX, 16); // 3
-    mov_reg32_preg32x4pimm32(EBX, EBX, (unsigned int)r4300->mem->readmemd); // 7
+    mov_reg32_imm32(EBX, (unsigned int)dynarec_read_aligned_dword); // 5
     call_reg32(EBX); // 2
     jmp_imm_short(32); // 2
 
     and_reg32_imm32(EBX, 0x7FFFFF); // 6
-    mov_reg32_preg32pimm32(EAX, EBX, ((unsigned int)r4300->ri->rdram.dram)+4); // 6
-    mov_reg32_preg32pimm32(ECX, EBX, ((unsigned int)r4300->ri->rdram.dram)); // 6
+    mov_reg32_preg32pimm32(EAX, EBX, ((unsigned int)r4300->rdram->dram)+4); // 6
+    mov_reg32_preg32pimm32(ECX, EBX, ((unsigned int)r4300->rdram->dram)); // 6
     mov_reg32_m32(EBX, (unsigned int*)(&(r4300_cp1_regs_double(&r4300->cp1))[r4300->recomp.dst->f.lf.ft])); // 6
     mov_preg32_reg32(EBX, EAX); // 2
     mov_preg32pimm32_reg32(EBX, 4, ECX); // 6
@@ -4171,32 +4250,40 @@ void genswc1(struct r4300_core* r4300)
     mov_eax_memoffs32((unsigned int *)(&r4300_regs(r4300)[r4300->recomp.dst->f.lf.base]));
     add_eax_imm32((int)r4300->recomp.dst->f.lf.offset);
     mov_reg32_reg32(EBX, EAX);
-    if (r4300->recomp.fast_memory)
-    {
-        and_eax_imm32(0xDF800000);
-        cmp_eax_imm32(0x80000000);
-    }
-    else
-    {
+
+    /* is address in RDRAM ? */
+    and_reg32_imm32(EAX, 0xDF800000);
+    cmp_reg32_imm32(EAX, 0x80000000);
+
+    /* when fast_memory is true, we know that there is
+     * no custom read handler so skip this test entirely */
+    if (!r4300->recomp.fast_memory) {
+        /* not in RDRAM anyway so skip the read32 check */
+        jne_rj(0);
+        jump_start_rel8();
+
         shr_reg32_imm8(EAX, 16);
-        mov_reg32_preg32x4pimm32(EAX, EAX, (unsigned int)r4300->mem->writemem);
-        cmp_reg32_imm32(EAX, (unsigned int)write_rdram);
+        and_reg32_imm32(EAX, 0x1fff);
+        lea_reg32_preg32x2preg32(EAX, EAX, EAX);
+        mov_reg32_preg32x4pimm32(EAX, EAX, (unsigned int)r4300->mem->handlers[0].write32);
+        cmp_reg32_imm32(EAX, (unsigned int)write_rdram_dram);
+
+        jump_end_rel8();
     }
-    je_rj(51);
+    je_rj(46);
 
     mov_m32_imm32((unsigned int *)(&(*r4300_pc_struct(r4300))), (unsigned int)(r4300->recomp.dst+1)); // 10
     mov_m32_reg32((unsigned int *)(r4300_address(r4300)), EBX); // 6
     mov_m32_reg32((unsigned int *)(r4300_wword(r4300)), ECX); // 6
     mov_m32_imm32((unsigned int *)(r4300_wmask(r4300)), ~UINT32_C(0)); // 10
-    shr_reg32_imm8(EBX, 16); // 3
-    mov_reg32_preg32x4pimm32(EBX, EBX, (unsigned int)r4300->mem->writemem); // 7
+    mov_reg32_imm32(EBX, (unsigned int)dynarec_write_aligned_word); // 5
     call_reg32(EBX); // 2
     mov_eax_memoffs32((unsigned int *)(r4300_address(r4300))); // 5
     jmp_imm_short(14); // 2
 
     mov_reg32_reg32(EAX, EBX); // 2
     and_reg32_imm32(EBX, 0x7FFFFF); // 6
-    mov_preg32pimm32_reg32(EBX, (unsigned int)r4300->ri->rdram.dram, ECX); // 6
+    mov_preg32pimm32_reg32(EBX, (unsigned int)r4300->rdram->dram, ECX); // 6
 
     mov_reg32_reg32(EBX, EAX);
     shr_reg32_imm8(EBX, 12);
@@ -4230,33 +4317,41 @@ void gensdc1(struct r4300_core* r4300)
     mov_eax_memoffs32((unsigned int *)(&r4300_regs(r4300)[r4300->recomp.dst->f.lf.base]));
     add_eax_imm32((int)r4300->recomp.dst->f.lf.offset);
     mov_reg32_reg32(EBX, EAX);
-    if (r4300->recomp.fast_memory)
-    {
-        and_eax_imm32(0xDF800000);
-        cmp_eax_imm32(0x80000000);
-    }
-    else
-    {
+
+    /* is address in RDRAM ? */
+    and_reg32_imm32(EAX, 0xDF800000);
+    cmp_reg32_imm32(EAX, 0x80000000);
+
+    /* when fast_memory is true, we know that there is
+     * no custom read handler so skip this test entirely */
+    if (!r4300->recomp.fast_memory) {
+        /* not in RDRAM anyway so skip the read32 check */
+        jne_rj(0);
+        jump_start_rel8();
+
         shr_reg32_imm8(EAX, 16);
-        mov_reg32_preg32x4pimm32(EAX, EAX, (unsigned int)r4300->mem->writememd);
-        cmp_reg32_imm32(EAX, (unsigned int)write_rdramd);
+        and_reg32_imm32(EAX, 0x1fff);
+        lea_reg32_preg32x2preg32(EAX, EAX, EAX);
+        mov_reg32_preg32x4pimm32(EAX, EAX, (unsigned int)r4300->mem->handlers[0].write32);
+        cmp_reg32_imm32(EAX, (unsigned int)write_rdram_dram);
+
+        jump_end_rel8();
     }
-    je_rj(47);
+    je_rj(42);
 
     mov_m32_imm32((unsigned int *)(&(*r4300_pc_struct(r4300))), (unsigned int)(r4300->recomp.dst+1)); // 10
     mov_m32_reg32((unsigned int *)(r4300_address(r4300)), EBX); // 6
     mov_m32_reg32((unsigned int *)(r4300_wdword(r4300)), ECX); // 6
     mov_m32_reg32((unsigned int *)(r4300_wdword(r4300))+1, EDX); // 6
-    shr_reg32_imm8(EBX, 16); // 3
-    mov_reg32_preg32x4pimm32(EBX, EBX, (unsigned int)r4300->mem->writememd); // 7
+    mov_reg32_imm32(EBX, (unsigned int)dynarec_write_aligned_dword); // 5
     call_reg32(EBX); // 2
     mov_eax_memoffs32((unsigned int *)(r4300_address(r4300))); // 5
     jmp_imm_short(20); // 2
 
     mov_reg32_reg32(EAX, EBX); // 2
     and_reg32_imm32(EBX, 0x7FFFFF); // 6
-    mov_preg32pimm32_reg32(EBX, ((unsigned int)r4300->ri->rdram.dram)+4, ECX); // 6
-    mov_preg32pimm32_reg32(EBX, ((unsigned int)r4300->ri->rdram.dram)+0, EDX); // 6
+    mov_preg32pimm32_reg32(EBX, ((unsigned int)r4300->rdram->dram)+4, ECX); // 6
+    mov_preg32pimm32_reg32(EBX, ((unsigned int)r4300->rdram->dram)+0, EDX); // 6
 
     mov_reg32_reg32(EBX, EAX);
     shr_reg32_imm8(EBX, 12);

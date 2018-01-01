@@ -34,7 +34,7 @@ void init_block(struct r4300_core* r4300, struct precomp_block* block);
 void free_block(struct r4300_core* r4300, struct precomp_block* block);
 void recompile_opcode(struct r4300_core* r4300);
 void dyna_jump(void);
-void dyna_start(void *code);
+void dyna_start(void (*code)(void));
 void dyna_stop(struct r4300_core* r4300);
 void *realloc_exec(void *ptr, size_t oldsize, size_t newsize);
 
@@ -44,6 +44,10 @@ void dynarec_exception_general(void);
 int dynarec_check_cop1_unusable(void);
 void dynarec_cp0_update_count(void);
 void dynarec_gen_interrupt(void);
+int dynarec_read_aligned_word(void);
+int dynarec_write_aligned_word(void);
+int dynarec_read_aligned_dword(void);
+int dynarec_write_aligned_dword(void);
 
 
 #if defined(PROFILE_R4300)

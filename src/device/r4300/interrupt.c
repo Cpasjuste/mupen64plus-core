@@ -23,6 +23,11 @@
 
 #include "interrupt.h"
 
+#ifdef __MINGW32__
+#define _CRT_RAND_S
+#include <stdlib.h>
+#endif
+
 #include <assert.h>
 #include <stddef.h>
 #include <stdint.h>
@@ -30,15 +35,14 @@
 
 #include "api/callbacks.h"
 #include "api/m64p_types.h"
-#include "device/ai/ai_controller.h"
-#include "device/pifbootrom/pifbootrom.h"
+#include "device/pif/bootrom_hle.h"
 #include "device/r4300/cached_interp.h"
 #include "device/r4300/exception.h"
-#include "device/r4300/mi_controller.h"
 #include "device/r4300/new_dynarec/new_dynarec.h"
 #include "device/r4300/r4300_core.h"
 #include "device/r4300/recomp.h"
-#include "device/vi/vi_controller.h"
+#include "device/rcp/ai/ai_controller.h"
+#include "device/rcp/vi/vi_controller.h"
 #include "main/main.h"
 #include "main/savestates.h"
 
@@ -124,6 +128,20 @@ static int before_event(const struct cp0* cp0, unsigned int evt1, unsigned int e
         }
     }
     else return 0;
+}
+
+unsigned int add_random_interrupt_time(struct r4300_core* r4300)
+{
+    if (r4300->randomize_interrupt) {
+        unsigned int value;
+#ifdef __MINGW32__
+        rand_s(&value);
+#else
+        value = rand();
+#endif
+        return value % 0x40;
+    } else
+        return 0;
 }
 
 void add_interrupt_event(struct cp0* cp0, int type, unsigned int delay)
@@ -323,18 +341,19 @@ void init_interrupt(struct cp0* cp0)
     add_interrupt_event_count(cp0, SPECIAL_INT, 0);
 }
 
-void check_interrupt(struct r4300_core* r4300)
+void r4300_check_interrupt(struct r4300_core* r4300, uint32_t cause_ip, int set_cause)
 {
     struct node* event;
     uint32_t* cp0_regs = r4300_cp0_regs(&r4300->cp0);
     unsigned int* cp0_next_interrupt = r4300_cp0_next_interrupt(&r4300->cp0);
 
-    if (r4300->mi.regs[MI_INTR_REG] & r4300->mi.regs[MI_INTR_MASK_REG]) {
-        cp0_regs[CP0_CAUSE_REG] = (cp0_regs[CP0_CAUSE_REG] | CP0_CAUSE_IP2) & ~CP0_CAUSE_EXCCODE_MASK;
+    if (set_cause) {
+        cp0_regs[CP0_CAUSE_REG] = (cp0_regs[CP0_CAUSE_REG] | cause_ip) & ~CP0_CAUSE_EXCCODE_MASK;
     }
     else {
-        cp0_regs[CP0_CAUSE_REG] &= ~CP0_CAUSE_IP2;
+        cp0_regs[CP0_CAUSE_REG] &= ~cause_ip;
     }
+
     if ((cp0_regs[CP0_STATUS_REG] & (CP0_STATUS_IE | CP0_STATUS_EXL | CP0_STATUS_ERL)) != CP0_STATUS_IE) {
         return;
     }
@@ -365,33 +384,10 @@ void check_interrupt(struct r4300_core* r4300)
     }
 }
 
-static void wrapped_exception_general(struct r4300_core* r4300)
-{
-#ifdef NEW_DYNAREC
-    uint32_t* cp0_regs = r4300_cp0_regs(&r4300->cp0);
-    if (r4300->emumode == EMUMODE_DYNAREC) {
-        cp0_regs[CP0_EPC_REG] = (r4300->new_dynarec_hot_state.pcaddr&~3)-(r4300->new_dynarec_hot_state.pcaddr&1)*4;
-        r4300->new_dynarec_hot_state.pcaddr = 0x80000180;
-        cp0_regs[CP0_STATUS_REG] |= CP0_STATUS_EXL;
-        if (r4300->new_dynarec_hot_state.pcaddr & 1) {
-          cp0_regs[CP0_CAUSE_REG] |= CP0_CAUSE_BD;
-        }
-        else {
-          cp0_regs[CP0_CAUSE_REG] &= ~CP0_CAUSE_BD;
-        }
-        r4300->new_dynarec_hot_state.pending_exception=1;
-    } else {
-        exception_general(r4300);
-    }
-#else
-    exception_general(r4300);
-#endif
-}
-
-void raise_maskable_interrupt(struct r4300_core* r4300, uint32_t cause)
+void raise_maskable_interrupt(struct r4300_core* r4300, uint32_t cause_ip)
 {
     uint32_t* cp0_regs = r4300_cp0_regs(&r4300->cp0);
-    cp0_regs[CP0_CAUSE_REG] = (cp0_regs[CP0_CAUSE_REG] | cause) & ~CP0_CAUSE_EXCCODE_MASK;
+    cp0_regs[CP0_CAUSE_REG] = (cp0_regs[CP0_CAUSE_REG] | cause_ip) & ~CP0_CAUSE_EXCCODE_MASK;
 
     if (!(cp0_regs[CP0_STATUS_REG] & cp0_regs[CP0_CAUSE_REG] & UINT32_C(0xff00))) {
         return;
@@ -401,7 +397,7 @@ void raise_maskable_interrupt(struct r4300_core* r4300, uint32_t cause)
         return;
     }
 
-    wrapped_exception_general(r4300);
+    exception_general(r4300);
 }
 
 void compare_int_handler(void* opaque)
@@ -418,7 +414,7 @@ void compare_int_handler(void* opaque)
 
 void check_int_handler(void* opaque)
 {
-    wrapped_exception_general((struct r4300_core*)opaque);
+    exception_general((struct r4300_core*)opaque);
 }
 
 void special_int_handler(void* opaque)
@@ -435,17 +431,6 @@ void special_int_handler(void* opaque)
     add_interrupt_event_count(cp0, SPECIAL_INT, 0);
 }
 
-void hw2_int_handler(void* opaque)
-{
-    struct r4300_core* r4300 = (struct r4300_core*)opaque;
-    uint32_t* cp0_regs = r4300_cp0_regs(&r4300->cp0);
-
-    cp0_regs[CP0_STATUS_REG] = (cp0_regs[CP0_STATUS_REG] & ~(CP0_STATUS_SR | CP0_STATUS_TS | UINT32_C(0x00080000))) | CP0_STATUS_IM4;
-    cp0_regs[CP0_CAUSE_REG] = (cp0_regs[CP0_CAUSE_REG] | CP0_CAUSE_IP4) & ~CP0_CAUSE_EXCCODE_MASK;
-
-    wrapped_exception_general(r4300);
-}
-
 /* XXX: this should only require r4300 struct not device ? */
 /* XXX: This is completly WTF ! */
 void nmi_int_handler(void* opaque)
@@ -454,17 +439,19 @@ void nmi_int_handler(void* opaque)
     struct r4300_core* r4300 = &dev->r4300;
     uint32_t* cp0_regs = r4300_cp0_regs(&r4300->cp0);
 
+    reset_pif(&dev->pif, 1);
+
     // setup r4300 Status flags: reset TS and SR, set BEV, ERL, and SR
     cp0_regs[CP0_STATUS_REG] = (cp0_regs[CP0_STATUS_REG] & ~(CP0_STATUS_SR | CP0_STATUS_TS | UINT32_C(0x00080000))) | (CP0_STATUS_ERL | CP0_STATUS_BEV | CP0_STATUS_SR);
     cp0_regs[CP0_CAUSE_REG]  = 0x00000000;
     // simulate the soft reset code which would run from the PIF ROM
-    pifbootrom_hle_execute(dev);
+    pif_bootrom_hle_execute(r4300);
     // clear all interrupts, reset interrupt counters back to 0
     cp0_regs[CP0_COUNT_REG] = 0;
     g_gs_vi_counter = 0;
     init_interrupt(&r4300->cp0);
 
-    dev->vi.delay = dev->vi.next_vi = 5000;
+    dev->vi.next_vi = cp0_regs[CP0_COUNT_REG] + dev->vi.delay;
     add_interrupt_event_count(&r4300->cp0, VI_INT, dev->vi.next_vi);
 
     // clear the audio status register so that subsequent write_ai() calls will work properly
@@ -472,12 +459,7 @@ void nmi_int_handler(void* opaque)
     // set ErrorEPC with the last instruction address
     cp0_regs[CP0_ERROREPC_REG] = *r4300_pc(r4300);
     // reset the r4300 internal state
-    if (r4300->emumode != EMUMODE_PURE_INTERPRETER)
-    {
-        // clear all the compiled instruction blocks and re-initialize
-        free_blocks(r4300);
-        init_blocks(r4300);
-    }
+    invalidate_r4300_cached_code(r4300, 0, 0);
     // adjust ErrorEPC if we were in a delay slot, and clear the r4300->delay_slot and r4300->dyna_interp flags
     if(r4300->delay_slot==1 || r4300->delay_slot==3)
     {
@@ -488,16 +470,6 @@ void nmi_int_handler(void* opaque)
     // set next instruction address to reset vector
     r4300->cp0.last_addr = UINT32_C(0xa4000040);
     generic_jump_to(r4300, UINT32_C(0xa4000040));
-
-#ifdef NEW_DYNAREC
-    if (r4300->emumode == EMUMODE_DYNAREC)
-    {
-        cp0_regs[CP0_ERROREPC_REG]=(r4300->new_dynarec_hot_state.pcaddr&~3)-(r4300->new_dynarec_hot_state.pcaddr&1)*4;
-        r4300->new_dynarec_hot_state.pcaddr = 0xa4000040;
-        r4300->new_dynarec_hot_state.pending_exception = 1;
-        invalidate_all_pages();
-    }
-#endif
 }
 
 
@@ -509,19 +481,11 @@ void reset_hard_handler(void* opaque)
 
     poweron_device(dev);
 
-    pifbootrom_hle_execute(dev);
+    pif_bootrom_hle_execute(r4300);
     r4300->cp0.last_addr = UINT32_C(0xa4000040);
     *r4300_cp0_next_interrupt(&r4300->cp0) = 624999;
     init_interrupt(&r4300->cp0);
-
-    dev->vi.delay = dev->vi.next_vi = 5000;
-    add_interrupt_event_count(&r4300->cp0, VI_INT, dev->vi.next_vi);
-
-    if (r4300->emumode != EMUMODE_PURE_INTERPRETER)
-    {
-        free_blocks(r4300);
-        init_blocks(r4300);
-    }
+    invalidate_r4300_cached_code(r4300, 0, 0);
     generic_jump_to(r4300, r4300->cp0.last_addr);
 }
 
@@ -635,7 +599,7 @@ void gen_interrupt(struct r4300_core* r4300)
         default:
             DebugMessage(M64MSG_ERROR, "Unknown interrupt queue event type %.8X.", r4300->cp0.q.first->data.type);
             remove_interrupt_event(&r4300->cp0);
-            wrapped_exception_general(r4300);
+            exception_general(r4300);
             break;
     }
 

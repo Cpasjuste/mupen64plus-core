@@ -54,10 +54,8 @@ struct new_dynarec_hot_state
     unsigned int memory_map[1048576];
 #elif NEW_DYNAREC == NEW_DYNAREC_ARM
     /* 0-6:   used by dynarec to push/pop caller-saved register (r0-r3, r12) and possibly lr (see invalidate_addr)
-       7-15:  saved_context,
-       16-23: stack_level_1
-       24-31: stack_level_2 */
-    uint32_t dynarec_local[32];
+       7-15:  saved_context*/
+    uint32_t dynarec_local[16];
     unsigned int next_interrupt;
     int cycle_count;
     int last_count;
@@ -94,7 +92,6 @@ struct new_dynarec_hot_state
 extern unsigned int stop_after_jal;
 extern unsigned int using_tlb;
 
-void invalidate_all_pages(void);
 void invalidate_cached_code_new_dynarec(struct r4300_core* r4300, uint32_t address, size_t size);
 void new_dynarec_init(void);
 void new_dyna_start(void);

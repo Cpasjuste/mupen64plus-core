@@ -24,7 +24,6 @@
 #if defined(COUNT_INSTR)
 #include "instr_counters.h"
 #endif
-#include "mi_controller.h"
 #include "new_dynarec/new_dynarec.h"
 #include "pure_interp.h"
 #include "recomp.h"
@@ -39,9 +38,10 @@
 #include "main/main.h"
 
 #include <string.h>
+#include <time.h>
 
-
-void init_r4300(struct r4300_core* r4300, struct memory* mem, struct ri_controller* ri, const struct interrupt_handler* interrupt_handlers, unsigned int emumode, unsigned int count_per_op, int no_compiled_jump, int special_rom)
+void init_r4300(struct r4300_core* r4300, struct memory* mem, struct mi_controller* mi, struct rdram* rdram, const struct interrupt_handler* interrupt_handlers,
+    unsigned int emumode, unsigned int count_per_op, int no_compiled_jump, int randomize_interrupt)
 {
     struct new_dynarec_hot_state* new_dynarec_hot_state =
 #if NEW_DYNAREC == NEW_DYNAREC_ARM
@@ -57,8 +57,10 @@ void init_r4300(struct r4300_core* r4300, struct memory* mem, struct ri_controll
     r4300->recomp.no_compiled_jump = no_compiled_jump;
 
     r4300->mem = mem;
-    r4300->ri = ri;
-    r4300->special_rom = special_rom;
+    r4300->mi = mi;
+    r4300->rdram = rdram;
+    r4300->randomize_interrupt = randomize_interrupt;
+    srand(time(NULL));
 }
 
 void poweron_r4300(struct r4300_core* r4300)
@@ -111,9 +113,6 @@ void poweron_r4300(struct r4300_core* r4300)
 
     /* setup CP1 registers */
     poweron_cp1(&r4300->cp1);
-
-    /* setup mi */
-    poweron_mi(&r4300->mi);
 }
 
 
@@ -312,6 +311,127 @@ uint64_t* r4300_wdword(struct r4300_core* r4300)
 #endif
 }
 
+uint32_t *fast_mem_access(struct r4300_core* r4300, uint32_t address)
+{
+    /* This code is performance critical, specially on pure interpreter mode.
+     * Removing error checking saves some time, but the emulator may crash. */
+
+    if ((address & UINT32_C(0xc0000000)) != UINT32_C(0x80000000)) {
+        address = virtual_to_physical_address(r4300, address, 2);
+        if (address == 0) // TLB exception
+            return NULL;
+    }
+
+    address &= UINT32_C(0x1ffffffc);
+
+    return mem_base_u32(r4300->mem->base, address);
+}
+
+/* Read aligned word from memory.
+ * address may not be word-aligned for byte or hword accesses.
+ * Alignment is taken care of when calling mem handler.
+ */
+int r4300_read_aligned_word(struct r4300_core* r4300, uint32_t address, uint32_t* value)
+{
+    if ((address & UINT32_C(0xc0000000)) != UINT32_C(0x80000000)) {
+        address = virtual_to_physical_address(r4300, address, 0);
+        if (address == 0) {
+            return 0;
+        }
+    }
+
+    address &= UINT32_C(0x1ffffffc);
+
+    mem_read32(mem_get_handler(r4300->mem, address), address & ~UINT32_C(3), value);
+
+    return 1;
+}
+
+/* Read aligned dword from memory */
+int r4300_read_aligned_dword(struct r4300_core* r4300, uint32_t address, uint64_t* value)
+{
+    uint32_t w[2];
+
+    /* XXX: unaligned dword accesses should trigger a address error,
+     * but inaccurate timing of the core can lead to unaligned address on reset
+     * so just emit a warning and keep going */
+    if ((address & 0x7) != 0) {
+        DebugMessage(M64MSG_WARNING, "Unaligned dword read %08x", address);
+    }
+
+    if ((address & UINT32_C(0xc0000000)) != UINT32_C(0x80000000)) {
+        address = virtual_to_physical_address(r4300, address, 0);
+        if (address == 0) {
+            return 0;
+        }
+    }
+
+    address &= UINT32_C(0x1ffffffc);
+
+    const struct mem_handler* handler = mem_get_handler(r4300->mem, address);
+    mem_read32(handler, address + 0, &w[0]);
+    mem_read32(handler, address + 4, &w[1]);
+
+    *value = ((uint64_t)w[0] << 32) | w[1];
+
+    return 1;
+}
+
+/* Write aligned word to memory.
+ * address may not be word-aligned for byte or hword accesses.
+ * Alignment is taken care of when calling mem handler.
+ */
+int r4300_write_aligned_word(struct r4300_core* r4300, uint32_t address, uint32_t value, uint32_t mask)
+{
+    if ((address & UINT32_C(0xc0000000)) != UINT32_C(0x80000000)) {
+
+        invalidate_r4300_cached_code(r4300, address, 4);
+
+        address = virtual_to_physical_address(r4300, address, 1);
+        if (address == 0) {
+            return 0;
+        }
+    }
+
+    invalidate_r4300_cached_code(r4300, address, 4);
+
+    address &= UINT32_C(0x1ffffffc);
+
+    mem_write32(mem_get_handler(r4300->mem, address), address & ~UINT32_C(3), value, mask);
+
+    return 1;
+}
+
+/* Write aligned dword to memory */
+int r4300_write_aligned_dword(struct r4300_core* r4300, uint32_t address, uint64_t value, uint64_t mask)
+{
+    /* XXX: unaligned dword accesses should trigger a address error,
+     * but inaccurate timing of the core can lead to unaligned address on reset
+     * so just emit a warning and keep going */
+    if ((address & 0x7) != 0) {
+        DebugMessage(M64MSG_WARNING, "Unaligned dword write %08x", address);
+    }
+
+    if ((address & UINT32_C(0xc0000000)) != UINT32_C(0x80000000)) {
+
+        invalidate_r4300_cached_code(r4300, address, 8);
+
+        address = virtual_to_physical_address(r4300, address, 1);
+        if (address == 0) {
+            return 0;
+        }
+    }
+
+    invalidate_r4300_cached_code(r4300, address, 8);
+
+    address &= UINT32_C(0x1ffffffc);
+
+    const struct mem_handler* handler = mem_get_handler(r4300->mem, address);
+    mem_write32(handler, address + 0, value >> 32, mask >> 32);
+    mem_write32(handler, address + 4, value      , mask      );
+
+    return 1;
+}
 
 void invalidate_r4300_cached_code(struct r4300_core* r4300, uint32_t address, size_t size)
 {
@@ -342,7 +462,8 @@ void generic_jump_to(struct r4300_core* r4300, uint32_t address)
 #ifdef NEW_DYNAREC
         if (r4300->emumode == EMUMODE_DYNAREC)
         {
-            r4300->cp0.last_addr = r4300->new_dynarec_hot_state.pcaddr;
+            r4300->new_dynarec_hot_state.pcaddr = address;
+            r4300->new_dynarec_hot_state.pending_exception = 1;
         }
         else
 #endif
@@ -356,17 +477,6 @@ void generic_jump_to(struct r4300_core* r4300, uint32_t address)
 /* XXX: not really a good interface but it gets the job done... */
 void savestates_load_set_pc(struct r4300_core* r4300, uint32_t pc)
 {
-#ifdef NEW_DYNAREC
-    if (r4300->emumode == EMUMODE_DYNAREC)
-    {
-        r4300->new_dynarec_hot_state.pcaddr = pc;
-        r4300->new_dynarec_hot_state.pending_exception = 1;
-        invalidate_all_pages();
-    }
-    else
-#endif
-    {
-        generic_jump_to(r4300, pc);
-        invalidate_r4300_cached_code(r4300, 0, 0);
-    }
+    generic_jump_to(r4300, pc);
+    invalidate_r4300_cached_code(r4300, 0, 0);
 }

@@ -128,7 +128,7 @@ endif
 
 # base CFLAGS, LDLIBS, and LDFLAGS
 OPTFLAGS ?= -O3 -flto
-WARNFLAGS ?= -Wall -Wno-unused-function
+WARNFLAGS ?= -Wall
 CFLAGS += $(OPTFLAGS) $(WARNFLAGS) -ffast-math -fno-strict-aliasing -fvisibility=hidden -I../../src -I../../src/asm_defines -DM64P_PARALLEL
 CXXFLAGS += -fvisibility-inlines-hidden
 LDLIBS +=  -lm
@@ -182,9 +182,7 @@ ifeq ($(OS), LINUX)
   endif
 endif
 ifeq ($(OS), OSX)
-  #xcode-select has been around since XCode 3.0, i.e. OS X 10.5
-  OSX_SDK_ROOT = $(shell xcode-select -print-path)/Platforms/MacOSX.platform/Developer/SDKs
-  OSX_SDK_PATH = $(OSX_SDK_ROOT)/$(shell ls $(OSX_SDK_ROOT) | tail -1)
+  OSX_SDK_PATH = $(shell xcrun --sdk macosx --show-sdk-path)
 
   TARGET = libmupen64plus$(POSTFIX).dylib
   LDFLAGS += -framework CoreFoundation -dynamiclib
@@ -284,22 +282,23 @@ ifeq ($(origin SDL_CFLAGS) $(origin SDL_LDLIBS), undefined undefined)
       $(warning Using SDL 1.2 libraries)
     endif
   endif
-  SDL_CFLAGS  += $(shell $(SDL_CONFIG) --cflags) -DUSE_SDL
+  SDL_CFLAGS  += $(shell $(SDL_CONFIG) --cflags)
   SDL_LDLIBS += $(shell $(SDL_CONFIG) --libs)
 endif
 CFLAGS += $(SDL_CFLAGS)
 LDLIBS += $(SDL_LDLIBS)
 
 ifeq ($(VC), 1)
-  CFLAGS += -DUSE_GLES -I/opt/vc/include -I/opt/vc/include/interface/vcos/pthreads -I/opt/vc/include/vmcs_host/linux
-  LDLIBS += -L/opt/vc/lib -lGLESv2 -lEGL -lbcm_host -lvcos -lvchiq_arm
-  # OSD uses non-ES code and breaks attribs of video plugins
-  OSD=0
+  CFLAGS += -I/opt/vc/include -I/opt/vc/include/interface/vcos/pthreads -I/opt/vc/include/vmcs_host/linux
+  LDLIBS += -L/opt/vc/lib -lbrcmEGL -lbcm_host -lvcos -lvchiq_arm
+  GLES_LIB := -lbrcmGLESv2
+  USE_GLES := 1
 endif
 
 ifeq ($(USE_GLES), 1)
+  GLES_LIB ?= -lGLESv2
   CFLAGS += -DUSE_GLES
-  LDLIBS += -lGLESv2
+  LDLIBS += $(GLES_LIB)
   # OSD uses non-ES code and breaks attribs of video plugins
   OSD=0
 endif
@@ -388,6 +387,7 @@ else
     CFLAGS += -g
     INSTALL_STRIP_FLAG ?= 
   else
+    CFLAGS += -DNDEBUG
     ifneq ($(OS),OSX)
       INSTALL_STRIP_FLAG ?= -s
     endif
@@ -406,15 +406,9 @@ endif
 ifeq ($(DBG_CORE), 1)
   CFLAGS += -DCORE_DBG
 endif
-ifeq ($(DBG_COUNT), 1)
-  CFLAGS += -DCOUNT_INSTR
-endif
 ifeq ($(DBG_TIMING), 1)
   CFLAGS += -DPROFILE
   LDFLAGS += -lrt
-endif
-ifeq ($(DBG_PROFILE), 1)
-  CFLAGS += -DPROFILE_R4300
 endif
 # 4. compile-time directory paths for building into the library
 ifneq ($(SHAREDIR),)
@@ -446,70 +440,64 @@ SOURCE = \
     $(SRCDIR)/api/debugger.c \
     $(SRCDIR)/api/frontend.c \
     $(SRCDIR)/api/vidext.c \
-    $(SRCDIR)/backends/audio_out_backend.c \
-    $(SRCDIR)/backends/clock_backend.c \
-    $(SRCDIR)/backends/controller_input_backend.c \
-    $(SRCDIR)/backends/rumble_backend.c \
-    $(SRCDIR)/backends/storage_backend.c \
-    $(SRCDIR)/device/ai/ai_controller.c \
+    $(SRCDIR)/backends/plugins_compat/audio_plugin_compat.c \
+    $(SRCDIR)/backends/plugins_compat/input_plugin_compat.c \
+    $(SRCDIR)/backends/clock_ctime_plus_delta.c \
+    $(SRCDIR)/backends/file_storage.c \
+    $(SRCDIR)/device/cart/cart.c \
+    $(SRCDIR)/device/cart/af_rtc.c \
+    $(SRCDIR)/device/cart/cart_rom.c \
+    $(SRCDIR)/device/cart/eeprom.c \
+    $(SRCDIR)/device/cart/flashram.c \
+    $(SRCDIR)/device/cart/sram.c \
+    $(SRCDIR)/device/controllers/game_controller.c \
+    $(SRCDIR)/device/controllers/paks/mempak.c \
+    $(SRCDIR)/device/controllers/paks/rumblepak.c \
+    $(SRCDIR)/device/controllers/paks/transferpak.c \
     $(SRCDIR)/device/device.c \
     $(SRCDIR)/device/gb/gb_cart.c \
     $(SRCDIR)/device/gb/mbc3_rtc.c \
+    $(SRCDIR)/device/gb/m64282fp.c \
     $(SRCDIR)/device/memory/memory.c \
-    $(SRCDIR)/device/pi/cart_rom.c \
-    $(SRCDIR)/device/pi/flashram.c \
-    $(SRCDIR)/device/pi/pi_controller.c \
-    $(SRCDIR)/device/pi/sram.c \
-    $(SRCDIR)/device/pifbootrom/pifbootrom.c \
+    $(SRCDIR)/device/pif/bootrom_hle.c \
+    $(SRCDIR)/device/pif/cic.c \
+    $(SRCDIR)/device/pif/n64_cic_nus_6105.c \
+    $(SRCDIR)/device/pif/pif.c \
     $(SRCDIR)/device/r4300/cached_interp.c \
     $(SRCDIR)/device/r4300/cp0.c \
     $(SRCDIR)/device/r4300/cp1.c \
     $(SRCDIR)/device/r4300/exception.c \
-    $(SRCDIR)/device/r4300/instr_counters.c \
     $(SRCDIR)/device/r4300/interrupt.c \
-    $(SRCDIR)/device/r4300/mi_controller.c \
     $(SRCDIR)/device/r4300/pure_interp.c \
     $(SRCDIR)/device/r4300/r4300_core.c \
     $(SRCDIR)/device/r4300/recomp.c \
     $(SRCDIR)/device/r4300/tlb.c \
-    $(SRCDIR)/device/rdp/fb.c \
-    $(SRCDIR)/device/rdp/rdp_core.c \
-    $(SRCDIR)/device/ri/rdram.c \
-    $(SRCDIR)/device/ri/rdram_detection_hack.c \
-    $(SRCDIR)/device/ri/ri_controller.c \
-    $(SRCDIR)/device/rsp/rsp_core.c \
-    $(SRCDIR)/device/si/af_rtc.c \
-    $(SRCDIR)/device/si/cic.c \
-    $(SRCDIR)/device/si/eeprom.c \
-    $(SRCDIR)/device/si/game_controller.c \
-    $(SRCDIR)/device/si/mempak.c \
-    $(SRCDIR)/device/si/n64_cic_nus_6105.c \
-    $(SRCDIR)/device/si/pif.c \
-    $(SRCDIR)/device/si/rumblepak.c \
-    $(SRCDIR)/device/si/si_controller.c \
-    $(SRCDIR)/device/si/transferpak.c \
-    $(SRCDIR)/device/vi/vi_controller.c \
+    $(SRCDIR)/device/rcp/ai/ai_controller.c \
+    $(SRCDIR)/device/rcp/mi/mi_controller.c \
+    $(SRCDIR)/device/rcp/pi/pi_controller.c \
+    $(SRCDIR)/device/rcp/rdp/fb.c \
+    $(SRCDIR)/device/rcp/rdp/rdp_core.c \
+    $(SRCDIR)/device/rcp/ri/ri_controller.c \
+    $(SRCDIR)/device/rcp/rsp/rsp_core.c \
+    $(SRCDIR)/device/rcp/si/si_controller.c \
+    $(SRCDIR)/device/rcp/vi/vi_controller.c \
+    $(SRCDIR)/device/rdram/rdram.c \
     $(SRCDIR)/main/main.c \
     $(SRCDIR)/main/util.c \
     $(SRCDIR)/main/cheat.c \
     $(SRCDIR)/main/eventloop.c \
     $(SRCDIR)/main/md5.c \
-    $(SRCDIR)/main/profile.c \
     $(SRCDIR)/main/rom.c \
     $(SRCDIR)/main/savestates.c \
     $(SRCDIR)/main/sdl_key_converter.c \
-    $(SRCDIR)/main/file_storage.c \
     $(SRCDIR)/main/workqueue.c \
     $(SRCDIR)/main/xxHash/xxhash.c \
-    $(SRCDIR)/plugin/input_plugin_compat.c \
-    $(SRCDIR)/plugin/emulate_speaker_via_audio_plugin.c \
-    $(SRCDIR)/plugin/get_time_using_time_plus_delta.c \
     $(SRCDIR)/plugin/plugin.c \
     $(SRCDIR)/plugin/dummy_video.c \
     $(SRCDIR)/plugin/dummy_audio.c \
     $(SRCDIR)/plugin/dummy_input.c \
     $(SRCDIR)/plugin/dummy_rsp.c \
-    $(SRCDIR)/osd/screenshot.cpp
+    $(SRCDIR)/osd/screenshot.c
 
 ifeq ("$(OS)","MINGW")
 SOURCE += \
@@ -528,6 +516,15 @@ SOURCE += \
 endif
 
 # source files for optional features
+ifeq ($(DBG_COUNT), 1)
+  CFLAGS += -DCOUNT_INSTR
+  SOURCE += $(SRCDIR)/device/r4300/instr_counters.c
+endif
+ifeq ($(DBG_PROFILE), 1)
+  CFLAGS += -DPROFILE_R4300
+  SOURCE += $(SRCDIR)/main/profile.c
+endif
+
 ifneq ($(NO_ASM), 1)
   ifeq ($(CPU), X86)
     ifeq ($(ARCH_DETECTED), 64BITS)

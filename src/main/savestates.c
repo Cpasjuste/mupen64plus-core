@@ -22,10 +22,8 @@
  *   51 Franklin Street, Fifth Floor, Boston, MA 02110-1301, USA.          *
  * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * */
 
-#ifdef USE_SDL
 #include <SDL.h>
 #include <SDL_thread.h>
-#endif
 #include <stddef.h>
 #include <stdint.h>
 #include <stdio.h>
@@ -39,17 +37,17 @@
 #include "api/config.h"
 #include "api/m64p_config.h"
 #include "api/m64p_types.h"
-#include "device/ai/ai_controller.h"
 #include "device/memory/memory.h"
-#include "device/pi/pi_controller.h"
 #include "device/r4300/new_dynarec/new_dynarec.h"
 #include "device/r4300/r4300_core.h"
-#include "device/rdp/rdp_core.h"
-#include "device/ri/ri_controller.h"
-#include "device/rsp/rsp_core.h"
-#include "device/si/si_controller.h"
+#include "device/rcp/ai/ai_controller.h"
+#include "device/rcp/pi/pi_controller.h"
+#include "device/rcp/rdp/rdp_core.h"
+#include "device/rcp/ri/ri_controller.h"
+#include "device/rcp/rsp/rsp_core.h"
+#include "device/rcp/si/si_controller.h"
+#include "device/rcp/vi/vi_controller.h"
 #include "device/gb/gb_cart.h"
-#include "device/vi/vi_controller.h"
 #include "main.h"
 #include "main/list.h"
 #include "osal/preproc.h"
@@ -72,7 +70,7 @@ enum { GB_CART_FINGERPRINT_SIZE = 0x1c };
 enum { GB_CART_FINGERPRINT_OFFSET = 0x134 };
 
 static const char* savestate_magic = "M64+SAVE";
-static const int savestate_latest_version = 0x00010100;  /* 1.1 */
+static const int savestate_latest_version = 0x00010200;  /* 1.2 */
 static const unsigned char pj64_magic[4] = { 0xC8, 0xA6, 0xD8, 0x23 };
 
 static savestates_job job = savestates_job_nothing;
@@ -82,9 +80,7 @@ static char *fname = NULL;
 static unsigned int slot = 0;
 static int autoinc_save_slot = 0;
 
-#ifdef USE_SDL
 static SDL_mutex *savestates_lock;
-#endif
 
 struct savestate_work {
     char *filepath;
@@ -213,20 +209,17 @@ int savestates_load_m64p(char *filepath)
     char queue[1024];
     unsigned char additionalData[4];
     unsigned char data_0001_0200[4096]; // 4k for extra state from v1.2
+    uint64_t flashram_status;
 
     uint32_t* cp0_regs = r4300_cp0_regs(&g_dev.r4300.cp0);
 
-#ifdef USE_SDL
     SDL_LockMutex(savestates_lock);
-#endif
 
     f = gzopen(filepath, "rb");
     if(f==NULL)
     {
         main_message(M64MSG_STATUS, OSD_BOTTOM_LEFT, "Could not open state file: %s", filepath);
-#ifdef USE_SDL
         SDL_UnlockMutex(savestates_lock);
-#endif
         return 0;
     }
 
@@ -235,9 +228,7 @@ int savestates_load_m64p(char *filepath)
     {
         main_message(M64MSG_STATUS, OSD_BOTTOM_LEFT, "Could not read header from state file %s", filepath);
         gzclose(f);
-#ifdef USE_SDL
         SDL_UnlockMutex(savestates_lock);
-#endif
         return 0;
     }
     curr = header;
@@ -246,9 +237,7 @@ int savestates_load_m64p(char *filepath)
     {
         main_message(M64MSG_STATUS, OSD_BOTTOM_LEFT, "State file: %s is not a valid Mupen64plus savestate.", filepath);
         gzclose(f);
-#ifdef USE_SDL
         SDL_UnlockMutex(savestates_lock);
-#endif
         return 0;
     }
     curr += 8;
@@ -261,9 +250,7 @@ int savestates_load_m64p(char *filepath)
     {
         main_message(M64MSG_STATUS, OSD_BOTTOM_LEFT, "State version (%08x) isn't compatible. Please update Mupen64Plus.", version);
         gzclose(f);
-#ifdef USE_SDL
         SDL_UnlockMutex(savestates_lock);
-#endif
         return 0;
     }
 
@@ -271,9 +258,7 @@ int savestates_load_m64p(char *filepath)
     {
         main_message(M64MSG_STATUS, OSD_BOTTOM_LEFT, "State ROM MD5 does not match current ROM.");
         gzclose(f);
-#ifdef USE_SDL
         SDL_UnlockMutex(savestates_lock);
-#endif
         return 0;
     }
     curr += 32;
@@ -285,43 +270,37 @@ int savestates_load_m64p(char *filepath)
     {
         main_message(M64MSG_STATUS, OSD_BOTTOM_LEFT, "Insufficient memory to load state.");
         gzclose(f);
-#ifdef USE_SDL
         SDL_UnlockMutex(savestates_lock);
-#endif
         return 0;
     }
     if (version == 0x00010000) /* original savestate version */
     {
-        if (gzread(f, savestateData, savestateSize) != savestateSize ||
+        if (gzread(f, savestateData, savestateSize) != (int)savestateSize ||
             (gzread(f, queue, sizeof(queue)) % 4) != 0)
         {
             main_message(M64MSG_STATUS, OSD_BOTTOM_LEFT, "Could not read Mupen64Plus savestate 1.0 data from %s", filepath);
             free(savestateData);
             gzclose(f);
-#ifdef USE_SDL
             SDL_UnlockMutex(savestates_lock);
-#endif
             return 0;
         }
     }
     else if (version == 0x00010100) // saves entire eventqueue plus 4-byte using_tlb flags
     {
-        if (gzread(f, savestateData, savestateSize) != savestateSize ||
+        if (gzread(f, savestateData, savestateSize) != (int)savestateSize ||
             gzread(f, queue, sizeof(queue)) != sizeof(queue) ||
             gzread(f, additionalData, sizeof(additionalData)) != sizeof(additionalData))
         {
             main_message(M64MSG_STATUS, OSD_BOTTOM_LEFT, "Could not read Mupen64Plus savestate 1.1 data from %s", filepath);
             free(savestateData);
             gzclose(f);
-#ifdef USE_SDL
             SDL_UnlockMutex(savestates_lock);
-#endif
             return 0;
         }
     }
     else // version >= 0x00010200  saves entire eventqueue, 4-byte using_tlb flags and extra state
     {
-        if (gzread(f, savestateData, savestateSize) != savestateSize ||
+        if (gzread(f, savestateData, savestateSize) != (int)savestateSize ||
             gzread(f, queue, sizeof(queue)) != sizeof(queue) ||
             gzread(f, additionalData, sizeof(additionalData)) != sizeof(additionalData) ||
             gzread(f, data_0001_0200, sizeof(data_0001_0200)) != sizeof(data_0001_0200))
@@ -329,36 +308,32 @@ int savestates_load_m64p(char *filepath)
             main_message(M64MSG_STATUS, OSD_BOTTOM_LEFT, "Could not read Mupen64Plus savestate 1.2 data from %s", filepath);
             free(savestateData);
             gzclose(f);
-#ifdef USE_SDL
             SDL_UnlockMutex(savestates_lock);
-#endif
             return 0;
         }
     }
 
     gzclose(f);
-#ifdef USE_SDL
     SDL_UnlockMutex(savestates_lock);
-#endif
 
     // Parse savestate
-    g_dev.ri.rdram.regs[RDRAM_CONFIG_REG]       = GETDATA(curr, uint32_t);
-    g_dev.ri.rdram.regs[RDRAM_DEVICE_ID_REG]    = GETDATA(curr, uint32_t);
-    g_dev.ri.rdram.regs[RDRAM_DELAY_REG]        = GETDATA(curr, uint32_t);
-    g_dev.ri.rdram.regs[RDRAM_MODE_REG]         = GETDATA(curr, uint32_t);
-    g_dev.ri.rdram.regs[RDRAM_REF_INTERVAL_REG] = GETDATA(curr, uint32_t);
-    g_dev.ri.rdram.regs[RDRAM_REF_ROW_REG]      = GETDATA(curr, uint32_t);
-    g_dev.ri.rdram.regs[RDRAM_RAS_INTERVAL_REG] = GETDATA(curr, uint32_t);
-    g_dev.ri.rdram.regs[RDRAM_MIN_INTERVAL_REG] = GETDATA(curr, uint32_t);
-    g_dev.ri.rdram.regs[RDRAM_ADDR_SELECT_REG]  = GETDATA(curr, uint32_t);
-    g_dev.ri.rdram.regs[RDRAM_DEVICE_MANUF_REG] = GETDATA(curr, uint32_t);
+    g_dev.rdram.regs[0][RDRAM_CONFIG_REG]       = GETDATA(curr, uint32_t);
+    g_dev.rdram.regs[0][RDRAM_DEVICE_ID_REG]    = GETDATA(curr, uint32_t);
+    g_dev.rdram.regs[0][RDRAM_DELAY_REG]        = GETDATA(curr, uint32_t);
+    g_dev.rdram.regs[0][RDRAM_MODE_REG]         = GETDATA(curr, uint32_t);
+    g_dev.rdram.regs[0][RDRAM_REF_INTERVAL_REG] = GETDATA(curr, uint32_t);
+    g_dev.rdram.regs[0][RDRAM_REF_ROW_REG]      = GETDATA(curr, uint32_t);
+    g_dev.rdram.regs[0][RDRAM_RAS_INTERVAL_REG] = GETDATA(curr, uint32_t);
+    g_dev.rdram.regs[0][RDRAM_MIN_INTERVAL_REG] = GETDATA(curr, uint32_t);
+    g_dev.rdram.regs[0][RDRAM_ADDR_SELECT_REG]  = GETDATA(curr, uint32_t);
+    g_dev.rdram.regs[0][RDRAM_DEVICE_MANUF_REG] = GETDATA(curr, uint32_t);
 
     curr += 4; /* Padding from old implementation */
-    g_dev.r4300.mi.regs[MI_INIT_MODE_REG] = GETDATA(curr, uint32_t);
+    g_dev.mi.regs[MI_INIT_MODE_REG] = GETDATA(curr, uint32_t);
     curr += 4; // Duplicate MI init mode flags from old implementation
-    g_dev.r4300.mi.regs[MI_VERSION_REG]   = GETDATA(curr, uint32_t);
-    g_dev.r4300.mi.regs[MI_INTR_REG]      = GETDATA(curr, uint32_t);
-    g_dev.r4300.mi.regs[MI_INTR_MASK_REG] = GETDATA(curr, uint32_t);
+    g_dev.mi.regs[MI_VERSION_REG]   = GETDATA(curr, uint32_t);
+    g_dev.mi.regs[MI_INTR_REG]      = GETDATA(curr, uint32_t);
+    g_dev.mi.regs[MI_INTR_MASK_REG] = GETDATA(curr, uint32_t);
     curr += 4; /* Padding from old implementation */
     curr += 8; // Duplicated MI intr flags and padding from old implementation
 
@@ -456,15 +431,17 @@ int savestates_load_m64p(char *filepath)
     g_dev.dp.dps_regs[DPS_BUFTEST_ADDR_REG] = GETDATA(curr, uint32_t);
     g_dev.dp.dps_regs[DPS_BUFTEST_DATA_REG] = GETDATA(curr, uint32_t);
 
-    COPYARRAY(g_dev.ri.rdram.dram, curr, uint32_t, RDRAM_MAX_SIZE/4);
+    COPYARRAY(g_dev.rdram.dram, curr, uint32_t, RDRAM_MAX_SIZE/4);
     COPYARRAY(g_dev.sp.mem, curr, uint32_t, SP_MEM_SIZE/4);
-    COPYARRAY(g_dev.si.pif.ram, curr, uint8_t, PIF_RAM_SIZE);
+    COPYARRAY(g_dev.pif.ram, curr, uint8_t, PIF_RAM_SIZE);
 
-    g_dev.pi.use_flashram = GETDATA(curr, int);
-    g_dev.pi.flashram.mode = GETDATA(curr, int);
-    g_dev.pi.flashram.status = GETDATA(curr, unsigned long long);
-    g_dev.pi.flashram.erase_offset = GETDATA(curr, unsigned int);
-    g_dev.pi.flashram.write_pointer = GETDATA(curr, unsigned int);
+    g_dev.cart.use_flashram = GETDATA(curr, int);
+    g_dev.cart.flashram.mode = GETDATA(curr, int);
+    flashram_status = GETDATA(curr, unsigned long long);
+    g_dev.cart.flashram.status[0] = (uint32_t)(flashram_status >> 32);
+    g_dev.cart.flashram.status[1] = (uint32_t)(flashram_status);
+    g_dev.cart.flashram.erase_offset = GETDATA(curr, unsigned int);
+    g_dev.cart.flashram.write_pointer = GETDATA(curr, unsigned int);
 
     COPYARRAY(g_dev.r4300.cp0.tlb.LUT_r, curr, uint32_t, 0x100000);
     COPYARRAY(g_dev.r4300.cp0.tlb.LUT_w, curr, uint32_t, 0x100000);
@@ -537,33 +514,41 @@ int savestates_load_m64p(char *filepath)
         g_dev.ai.delayed_carry = GETDATA(curr, uint32_t);
 
         /* extra cart_rom state */
-        g_dev.pi.cart_rom.last_write = GETDATA(curr, uint32_t);
-        g_dev.pi.cart_rom.rom_written = GETDATA(curr, uint32_t);
+        g_dev.cart.cart_rom.last_write = GETDATA(curr, uint32_t);
+        g_dev.cart.cart_rom.rom_written = GETDATA(curr, uint32_t);
 
         /* extra sp state */
         g_dev.sp.rsp_task_locked = GETDATA(curr, uint32_t);
 
         /* extra af-rtc state */
-        g_dev.si.pif.af_rtc.control = GETDATA(curr, uint16_t);
-        g_dev.si.pif.af_rtc.now = (time_t)GETDATA(curr, int64_t);
-        g_dev.si.pif.af_rtc.last_update_rtc = (time_t)GETDATA(curr, int64_t);
+        g_dev.cart.af_rtc.control = GETDATA(curr, uint16_t);
+        g_dev.cart.af_rtc.now = (time_t)GETDATA(curr, int64_t);
+        g_dev.cart.af_rtc.last_update_rtc = (time_t)GETDATA(curr, int64_t);
 
         /* extra controllers state */
         for (i = 0; i < GAME_CONTROLLERS_COUNT; ++i) {
-            g_dev.si.pif.controllers[i].status = GETDATA(curr, uint8_t);
+            g_dev.controllers[i].status = GETDATA(curr, uint8_t);
         }
 
         /* extra rpak state */
         for (i = 0; i < GAME_CONTROLLERS_COUNT; ++i) {
-            set_rumble_reg(&g_dev.si.pif.controllers[i].rumblepak, GETDATA(curr, uint8_t));
+            uint8_t rpk_state = GETDATA(curr, uint8_t);
+
+            /* skip non present or controllers handled by the input plugin */
+            if (!Controls[i].Present || Controls[i].RawData)
+                continue;
+
+            if (ROM_SETTINGS.rumble) {
+                set_rumble_reg(&g_dev.rumblepaks[i], rpk_state);
+            }
         }
 
         /* extra tpak state */
         for (i = 0; i < GAME_CONTROLLERS_COUNT; ++i) {
-            g_dev.si.pif.controllers[i].transferpak.enabled = GETDATA(curr, unsigned int);
-            g_dev.si.pif.controllers[i].transferpak.bank = GETDATA(curr, unsigned int);
-            g_dev.si.pif.controllers[i].transferpak.access_mode = GETDATA(curr, unsigned int);
-            g_dev.si.pif.controllers[i].transferpak.access_mode_changed = GETDATA(curr, unsigned int);
+            g_dev.transferpaks[i].enabled = GETDATA(curr, unsigned int);
+            g_dev.transferpaks[i].bank = GETDATA(curr, unsigned int);
+            g_dev.transferpaks[i].access_mode = GETDATA(curr, unsigned int);
+            g_dev.transferpaks[i].access_mode_changed = GETDATA(curr, unsigned int);
 
             /* verify that gb cart saved in savestate is the same as what is currently inserted in transferpak */
             char gb_fingerprint[GB_CART_FINGERPRINT_SIZE];
@@ -571,11 +556,12 @@ int savestates_load_m64p(char *filepath)
 
             COPYARRAY(gb_fingerprint, curr, uint8_t, GB_CART_FINGERPRINT_SIZE);
 
-            if (g_dev.si.pif.controllers[i].transferpak.gb_cart == NULL) {
+            if (g_dev.transferpaks[i].gb_cart == NULL) {
                 memset(current_gb_fingerprint, 0, GB_CART_FINGERPRINT_SIZE);
             }
             else {
-                memcpy(current_gb_fingerprint, g_dev.si.pif.controllers[i].transferpak.gb_cart->rom.data + GB_CART_FINGERPRINT_OFFSET, GB_CART_FINGERPRINT_SIZE);
+                uint8_t* rom = g_dev.transferpaks[i].gb_cart->irom_storage->data(g_dev.transferpaks[i].gb_cart->rom_storage);
+                memcpy(current_gb_fingerprint, rom + GB_CART_FINGERPRINT_OFFSET, GB_CART_FINGERPRINT_SIZE);
             }
 
             if (memcmp(gb_fingerprint, current_gb_fingerprint, GB_CART_FINGERPRINT_SIZE) != 0) {
@@ -584,19 +570,20 @@ int savestates_load_m64p(char *filepath)
                    (gb_fingerprint[0] == 0x00) ? "(none)" : gb_fingerprint);
 
                 if (gb_fingerprint[0] != 0x00) {
-                    curr += 5*sizeof(unsigned int)+MBC3_RTC_REGS_COUNT*2+sizeof(uint64_t);
+                    curr += 5*sizeof(unsigned int)+MBC3_RTC_REGS_COUNT*2+sizeof(uint64_t)+M64282FP_REGS_COUNT;
                 }
             }
             else {
-                if (g_dev.si.pif.controllers[i].transferpak.gb_cart != NULL) {
-                    g_dev.si.pif.controllers[i].transferpak.gb_cart->rom_bank = GETDATA(curr, unsigned int);
-                    g_dev.si.pif.controllers[i].transferpak.gb_cart->ram_bank = GETDATA(curr, unsigned int);
-                    g_dev.si.pif.controllers[i].transferpak.gb_cart->ram_enable = GETDATA(curr, unsigned int);
-                    g_dev.si.pif.controllers[i].transferpak.gb_cart->mbc1_mode = GETDATA(curr, unsigned int);
-                    COPYARRAY(g_dev.si.pif.controllers[i].transferpak.gb_cart->rtc.regs, curr, uint8_t, MBC3_RTC_REGS_COUNT);
-                    g_dev.si.pif.controllers[i].transferpak.gb_cart->rtc.latch = GETDATA(curr, unsigned int);
-                    COPYARRAY(g_dev.si.pif.controllers[i].transferpak.gb_cart->rtc.latched_regs, curr, uint8_t, MBC3_RTC_REGS_COUNT);
-                    g_dev.si.pif.controllers[i].transferpak.gb_cart->rtc.last_time = (time_t)GETDATA(curr, int64_t);
+                if (g_dev.transferpaks[i].gb_cart != NULL) {
+                    g_dev.transferpaks[i].gb_cart->rom_bank = GETDATA(curr, unsigned int);
+                    g_dev.transferpaks[i].gb_cart->ram_bank = GETDATA(curr, unsigned int);
+                    g_dev.transferpaks[i].gb_cart->ram_enable = GETDATA(curr, unsigned int);
+                    g_dev.transferpaks[i].gb_cart->mbc1_mode = GETDATA(curr, unsigned int);
+                    COPYARRAY(g_dev.transferpaks[i].gb_cart->rtc.regs, curr, uint8_t, MBC3_RTC_REGS_COUNT);
+                    g_dev.transferpaks[i].gb_cart->rtc.latch = GETDATA(curr, unsigned int);
+                    COPYARRAY(g_dev.transferpaks[i].gb_cart->rtc.latched_regs, curr, uint8_t, MBC3_RTC_REGS_COUNT);
+                    g_dev.transferpaks[i].gb_cart->rtc.last_time = (time_t)GETDATA(curr, int64_t);
+                    COPYARRAY(g_dev.transferpaks[i].gb_cart->cam.regs, curr, uint8_t, M64282FP_REGS_COUNT);
                 }
             }
         }
@@ -605,15 +592,35 @@ int savestates_load_m64p(char *filepath)
         for (i = 0; i < PIF_CHANNELS_COUNT; ++i) {
             int offset = GETDATA(curr, int8_t);
             if (offset >= 0) {
-                setup_pif_channel(&g_dev.si.pif.channels[i], g_dev.si.pif.ram + offset);
+                setup_pif_channel(&g_dev.pif.channels[i], g_dev.pif.ram + offset);
             }
             else {
-                disable_pif_channel(&g_dev.si.pif.channels[i]);
+                disable_pif_channel(&g_dev.pif.channels[i]);
             }
         }
 
         /* extra vi state */
         g_dev.vi.count_per_scanline = GETDATA(curr, unsigned int);
+
+        /* extra si state */
+        g_dev.si.dma_dir = GETDATA(curr, uint8_t);
+
+        /* extra dp state */
+        g_dev.dp.do_on_unfreeze = GETDATA(curr, uint8_t);
+
+        /* extra RDRAM register state */
+        for (i = 1; i < RDRAM_MAX_MODULES_COUNT; ++i) {
+            g_dev.rdram.regs[i][RDRAM_CONFIG_REG]       = GETDATA(curr, uint32_t);
+            g_dev.rdram.regs[i][RDRAM_DEVICE_ID_REG]    = GETDATA(curr, uint32_t);
+            g_dev.rdram.regs[i][RDRAM_DELAY_REG]        = GETDATA(curr, uint32_t);
+            g_dev.rdram.regs[i][RDRAM_MODE_REG]         = GETDATA(curr, uint32_t);
+            g_dev.rdram.regs[i][RDRAM_REF_INTERVAL_REG] = GETDATA(curr, uint32_t);
+            g_dev.rdram.regs[i][RDRAM_REF_ROW_REG]      = GETDATA(curr, uint32_t);
+            g_dev.rdram.regs[i][RDRAM_RAS_INTERVAL_REG] = GETDATA(curr, uint32_t);
+            g_dev.rdram.regs[i][RDRAM_MIN_INTERVAL_REG] = GETDATA(curr, uint32_t);
+            g_dev.rdram.regs[i][RDRAM_ADDR_SELECT_REG]  = GETDATA(curr, uint32_t);
+            g_dev.rdram.regs[i][RDRAM_DEVICE_MANUF_REG] = GETDATA(curr, uint32_t);
+        }
     }
     else {
         /* extra ai state */
@@ -621,34 +628,58 @@ int savestates_load_m64p(char *filepath)
         g_dev.ai.delayed_carry = 0;
 
         /* extra cart_rom state */
-        g_dev.pi.cart_rom.last_write = 0;
-        g_dev.pi.cart_rom.rom_written = 0;
+        g_dev.cart.cart_rom.last_write = 0;
+        g_dev.cart.cart_rom.rom_written = 0;
 
         /* extra sp state */
         g_dev.sp.rsp_task_locked = 0;
 
         /* extra af-rtc state */
-        g_dev.si.pif.af_rtc.control = 0x200;
-        g_dev.si.pif.af_rtc.now = 0;
-        g_dev.si.pif.af_rtc.last_update_rtc = 0;
+        g_dev.cart.af_rtc.control = 0x200;
+        g_dev.cart.af_rtc.now = 0;
+        g_dev.cart.af_rtc.last_update_rtc = 0;
 
         /* extra controllers state */
         for(i = 0; i < GAME_CONTROLLERS_COUNT; ++i) {
-            standard_controller_reset(&g_dev.si.pif.controllers[i]);
-            poweron_rumblepak(&g_dev.si.pif.controllers[i].rumblepak);
-            poweron_transferpak(&g_dev.si.pif.controllers[i].transferpak);
+            /* skip non present or controllers handled by the input plugin */
+            if (!Controls[i].Present || Controls[i].RawData)
+                continue;
+
+            g_dev.controllers[i].flavor->reset(&g_dev.controllers[i]);
+
+            if (ROM_SETTINGS.rumble) {
+                poweron_rumblepak(&g_dev.rumblepaks[i]);
+            }
+            if (ROM_SETTINGS.transferpak) {
+                poweron_transferpak(&g_dev.transferpaks[i]);
+            }
         }
 
         /* extra pif channels state
          * HACK: Assume PIF was in channel processing mode (and not in CIC challenge mode)
          * Try to parse pif ram to setup pif channels
          */
-        setup_channels_format(&g_dev.si.pif);
+        setup_channels_format(&g_dev.pif);
 
         /* extra vi state */
         g_dev.vi.count_per_scanline = (g_dev.vi.regs[VI_V_SYNC_REG] == 0)
             ? 1500
             : ((g_dev.vi.clock / g_dev.vi.expected_refresh_rate) / (g_dev.vi.regs[VI_V_SYNC_REG] + 1));
+
+        /* extra si state */
+        g_dev.si.dma_dir = SI_NO_DMA;
+
+        /* extra dp state */
+        g_dev.dp.do_on_unfreeze = 0;
+
+        /* extra rdram state
+         * Best effort, copy values from RDRAM module 0 except for DEVICE_ID
+         * which is set in accordance with the IPL3 procedure with 2M modules.
+         */
+        for (i = 0; i < RDRAM_MAX_MODULES_COUNT; ++i) {
+            memcpy(g_dev.rdram.regs[i], g_dev.rdram.regs[0], RDRAM_REGS_COUNT*sizeof(g_dev.rdram.regs[0][0]));
+            g_dev.rdram.regs[i][RDRAM_DEVICE_ID_REG] = ri_address_to_id_field(i * 0x200000) << 2;
+        }
     }
 
     /* Zilmar-Spec plugin expect a call with control_id = -1 when RAM processing is done */
@@ -672,7 +703,7 @@ static int savestates_load_pj64(char *filepath, void *handle,
 {
     char buffer[1024];
     unsigned int vi_timer, SaveRDRAMSize;
-    int i;
+    size_t i;
     uint32_t FCR31;
 
     unsigned char header[8];
@@ -717,7 +748,7 @@ static int savestates_load_pj64(char *filepath, void *handle,
 
     // check ROM header
     COPYARRAY(RomHeader, curr, unsigned int, 0x40/4);
-    if(memcmp(RomHeader, g_dev.pi.cart_rom.rom, 0x40) != 0)
+    if(memcmp(RomHeader, g_dev.cart.cart_rom.rom, 0x40) != 0)
     {
         main_message(M64MSG_STATUS, OSD_BOTTOM_LEFT, "State ROM header does not match current ROM.");
         free(savestateData);
@@ -769,16 +800,16 @@ static int savestates_load_pj64(char *filepath, void *handle,
     *r4300_mult_lo(&g_dev.r4300) = GETDATA(curr, int64_t);
 
     // rdram register
-    g_dev.ri.rdram.regs[RDRAM_CONFIG_REG]       = GETDATA(curr, uint32_t);
-    g_dev.ri.rdram.regs[RDRAM_DEVICE_ID_REG]    = GETDATA(curr, uint32_t);
-    g_dev.ri.rdram.regs[RDRAM_DELAY_REG]        = GETDATA(curr, uint32_t);
-    g_dev.ri.rdram.regs[RDRAM_MODE_REG]         = GETDATA(curr, uint32_t);
-    g_dev.ri.rdram.regs[RDRAM_REF_INTERVAL_REG] = GETDATA(curr, uint32_t);
-    g_dev.ri.rdram.regs[RDRAM_REF_ROW_REG]      = GETDATA(curr, uint32_t);
-    g_dev.ri.rdram.regs[RDRAM_RAS_INTERVAL_REG] = GETDATA(curr, uint32_t);
-    g_dev.ri.rdram.regs[RDRAM_MIN_INTERVAL_REG] = GETDATA(curr, uint32_t);
-    g_dev.ri.rdram.regs[RDRAM_ADDR_SELECT_REG]  = GETDATA(curr, uint32_t);
-    g_dev.ri.rdram.regs[RDRAM_DEVICE_MANUF_REG] = GETDATA(curr, uint32_t);
+    g_dev.rdram.regs[0][RDRAM_CONFIG_REG]       = GETDATA(curr, uint32_t);
+    g_dev.rdram.regs[0][RDRAM_DEVICE_ID_REG]    = GETDATA(curr, uint32_t);
+    g_dev.rdram.regs[0][RDRAM_DELAY_REG]        = GETDATA(curr, uint32_t);
+    g_dev.rdram.regs[0][RDRAM_MODE_REG]         = GETDATA(curr, uint32_t);
+    g_dev.rdram.regs[0][RDRAM_REF_INTERVAL_REG] = GETDATA(curr, uint32_t);
+    g_dev.rdram.regs[0][RDRAM_REF_ROW_REG]      = GETDATA(curr, uint32_t);
+    g_dev.rdram.regs[0][RDRAM_RAS_INTERVAL_REG] = GETDATA(curr, uint32_t);
+    g_dev.rdram.regs[0][RDRAM_MIN_INTERVAL_REG] = GETDATA(curr, uint32_t);
+    g_dev.rdram.regs[0][RDRAM_ADDR_SELECT_REG]  = GETDATA(curr, uint32_t);
+    g_dev.rdram.regs[0][RDRAM_DEVICE_MANUF_REG] = GETDATA(curr, uint32_t);
 
     // sp_register
     g_dev.sp.regs[SP_MEM_ADDR_REG]  = GETDATA(curr, uint32_t);
@@ -808,10 +839,10 @@ static int savestates_load_pj64(char *filepath, void *handle,
     (void)GETDATA(curr, unsigned int); // Dummy read
 
     // mi_register
-    g_dev.r4300.mi.regs[MI_INIT_MODE_REG] = GETDATA(curr, uint32_t);
-    g_dev.r4300.mi.regs[MI_VERSION_REG]   = GETDATA(curr, uint32_t);
-    g_dev.r4300.mi.regs[MI_INTR_REG]      = GETDATA(curr, uint32_t);
-    g_dev.r4300.mi.regs[MI_INTR_MASK_REG] = GETDATA(curr, uint32_t);
+    g_dev.mi.regs[MI_INIT_MODE_REG] = GETDATA(curr, uint32_t);
+    g_dev.mi.regs[MI_VERSION_REG]   = GETDATA(curr, uint32_t);
+    g_dev.mi.regs[MI_INTR_REG]      = GETDATA(curr, uint32_t);
+    g_dev.mi.regs[MI_INTR_MASK_REG] = GETDATA(curr, uint32_t);
 
     // vi_register
     g_dev.vi.regs[VI_STATUS_REG]  = GETDATA(curr, uint32_t);
@@ -836,7 +867,11 @@ static int savestates_load_pj64(char *filepath, void *handle,
         ? 1500
         : ((g_dev.vi.clock / g_dev.vi.expected_refresh_rate) / (g_dev.vi.regs[VI_V_SYNC_REG] + 1));
 
+    /* extra si state */
+    g_dev.si.dma_dir = SI_NO_DMA;
 
+    /* extra dp state */
+    g_dev.dp.do_on_unfreeze = 0;
 
     // ai_register
     g_dev.ai.regs[AI_DRAM_ADDR_REG] = GETDATA(curr, uint32_t);
@@ -868,8 +903,8 @@ static int savestates_load_pj64(char *filepath, void *handle,
     read_func(handle, g_dev.pi.regs, PI_REGS_COUNT*sizeof(g_dev.pi.regs[0]));
 
     /* extra cart_rom state */
-    g_dev.pi.cart_rom.last_write = 0;
-    g_dev.pi.cart_rom.rom_written = 0;
+    g_dev.cart.cart_rom.last_write = 0;
+    g_dev.cart.cart_rom.rom_written = 0;
 
     // ri_register
     g_dev.ri.regs[RI_MODE_REG]         = GETDATA(curr, uint32_t);
@@ -929,13 +964,13 @@ static int savestates_load_pj64(char *filepath, void *handle,
     }
 
     // pif ram
-    COPYARRAY(g_dev.si.pif.ram, curr, uint8_t, PIF_RAM_SIZE);
+    COPYARRAY(g_dev.pif.ram, curr, uint8_t, PIF_RAM_SIZE);
 
     /* extra pif channels state
      * HACK: Assume PIF was in channel processing mode (and not in CIC challenge mode)
      * Try to parse pif ram to setup pif channels
      */
-    setup_channels_format(&g_dev.si.pif);
+    setup_channels_format(&g_dev.pif);
 
     /* Zilmar-Spec plugin expect a call with control_id = -1 when RAM processing is done */
     if (input.controllerCommand) {
@@ -943,8 +978,8 @@ static int savestates_load_pj64(char *filepath, void *handle,
     }
 
     // RDRAM
-    memset(g_dev.ri.rdram.dram, 0, RDRAM_MAX_SIZE);
-    COPYARRAY(g_dev.ri.rdram.dram, curr, uint32_t, SaveRDRAMSize/4);
+    memset(g_dev.rdram.dram, 0, RDRAM_MAX_SIZE);
+    COPYARRAY(g_dev.rdram.dram, curr, uint32_t, SaveRDRAMSize/4);
 
     // DMEM + IMEM
     COPYARRAY(g_dev.sp.mem, curr, uint32_t, SP_MEM_SIZE/4);
@@ -958,22 +993,40 @@ static int savestates_load_pj64(char *filepath, void *handle,
     // g_dev.dp.dps_regs[DPS_BUFTEST_ADDR_REG] = 0; g_dev.dp.dps_regs[DPS_BUFTEST_DATA_REG] = 0; *r4300_llbit(&g_dev.r4300) = 0;
 
     // No flashram info in pj64 savestate.
-    poweron_flashram(&g_dev.pi.flashram);
+    poweron_flashram(&g_dev.cart.flashram);
 
     /* extra fb state */
     memset(&g_dev.dp.fb, 0, sizeof(g_dev.dp.fb));
     g_dev.dp.fb.once = 1;
 
     /* extra af-rtc state */
-    g_dev.si.pif.af_rtc.control = 0x200;
-    g_dev.si.pif.af_rtc.now = 0;
-    g_dev.si.pif.af_rtc.last_update_rtc = 0;
+    g_dev.cart.af_rtc.control = 0x200;
+    g_dev.cart.af_rtc.now = 0;
+    g_dev.cart.af_rtc.last_update_rtc = 0;
 
     /* extra controllers state */
     for(i = 0; i < GAME_CONTROLLERS_COUNT; ++i) {
-        standard_controller_reset(&g_dev.si.pif.controllers[i]);
-        poweron_rumblepak(&g_dev.si.pif.controllers[i].rumblepak);
-        poweron_transferpak(&g_dev.si.pif.controllers[i].transferpak);
+        /* skip non present or controllers handled by the input plugin */
+        if (!Controls[i].Present || Controls[i].RawData)
+            continue;
+
+        g_dev.controllers[i].flavor->reset(&g_dev.controllers[i]);
+
+        if (ROM_SETTINGS.rumble) {
+            poweron_rumblepak(&g_dev.rumblepaks[i]);
+        }
+        if (ROM_SETTINGS.transferpak) {
+            poweron_transferpak(&g_dev.transferpaks[i]);
+        }
+    }
+
+    /* extra rdram state
+     * Best effort, copy values from RDRAM module 0 except for DEVICE_ID
+     * which is set in accordance with the IPL3 procedure with 2M modules.
+     */
+    for (i = 0; i < (SaveRDRAMSize / 0x200000); ++i) {
+        memcpy(g_dev.rdram.regs[i], g_dev.rdram.regs[0], RDRAM_REGS_COUNT*sizeof(g_dev.rdram.regs[0][0]));
+        g_dev.rdram.regs[i][RDRAM_DEVICE_ID_REG] = ri_address_to_id_field(i * 0x200000) << 2;
     }
 
     savestates_load_set_pc(&g_dev.r4300, *r4300_cp0_last_addr(&g_dev.r4300.cp0));
@@ -986,7 +1039,8 @@ static int savestates_load_pj64(char *filepath, void *handle,
 
 static int read_data_from_zip(void *zip, void *buffer, size_t length)
 {
-    return unzReadCurrentFile((unzFile)zip, buffer, (unsigned)length) == length;
+    int err = unzReadCurrentFile((unzFile)zip, buffer, (unsigned)length);
+    return (err >= 0) && ((size_t)err == length);
 }
 
 static int savestates_load_pj64_zip(char *filepath)
@@ -1160,11 +1214,10 @@ int savestates_load(void)
 static void savestates_save_m64p_work(struct work_struct *work)
 {
     gzFile f;
+    int gzres;
     struct savestate_work *save = container_of(work, struct savestate_work, work);
 
-#ifdef USE_SDL
     SDL_LockMutex(savestates_lock);
-#endif
 
     // Write the state to a GZIP file
     f = gzopen(save->filepath, "wb");
@@ -1176,7 +1229,8 @@ static void savestates_save_m64p_work(struct work_struct *work)
         return;
     }
 
-    if (gzwrite(f, save->data, save->size) != save->size)
+    gzres = gzwrite(f, save->data, save->size);
+    if ((gzres < 0) || ((size_t)gzres != save->size))
     {
         main_message(M64MSG_STATUS, OSD_BOTTOM_LEFT, "Could not write data to state file: %s", save->filepath);
         gzclose(f);
@@ -1190,15 +1244,14 @@ static void savestates_save_m64p_work(struct work_struct *work)
     free(save->filepath);
     free(save);
 
-#ifdef USE_SDL
     SDL_UnlockMutex(savestates_lock);
-#endif
 }
 
 int savestates_save_m64p(char *filepath)
 {
     unsigned char outbuf[4];
     int i;
+    uint64_t flashram_status;
 
     char queue[1024];
 
@@ -1244,33 +1297,33 @@ int savestates_save_m64p(char *filepath)
 
     PUTARRAY(ROM_SETTINGS.MD5, curr, char, 32);
 
-    PUTDATA(curr, uint32_t, g_dev.ri.rdram.regs[RDRAM_CONFIG_REG]);
-    PUTDATA(curr, uint32_t, g_dev.ri.rdram.regs[RDRAM_DEVICE_ID_REG]);
-    PUTDATA(curr, uint32_t, g_dev.ri.rdram.regs[RDRAM_DELAY_REG]);
-    PUTDATA(curr, uint32_t, g_dev.ri.rdram.regs[RDRAM_MODE_REG]);
-    PUTDATA(curr, uint32_t, g_dev.ri.rdram.regs[RDRAM_REF_INTERVAL_REG]);
-    PUTDATA(curr, uint32_t, g_dev.ri.rdram.regs[RDRAM_REF_ROW_REG]);
-    PUTDATA(curr, uint32_t, g_dev.ri.rdram.regs[RDRAM_RAS_INTERVAL_REG]);
-    PUTDATA(curr, uint32_t, g_dev.ri.rdram.regs[RDRAM_MIN_INTERVAL_REG]);
-    PUTDATA(curr, uint32_t, g_dev.ri.rdram.regs[RDRAM_ADDR_SELECT_REG]);
-    PUTDATA(curr, uint32_t, g_dev.ri.rdram.regs[RDRAM_DEVICE_MANUF_REG]);
+    PUTDATA(curr, uint32_t, g_dev.rdram.regs[0][RDRAM_CONFIG_REG]);
+    PUTDATA(curr, uint32_t, g_dev.rdram.regs[0][RDRAM_DEVICE_ID_REG]);
+    PUTDATA(curr, uint32_t, g_dev.rdram.regs[0][RDRAM_DELAY_REG]);
+    PUTDATA(curr, uint32_t, g_dev.rdram.regs[0][RDRAM_MODE_REG]);
+    PUTDATA(curr, uint32_t, g_dev.rdram.regs[0][RDRAM_REF_INTERVAL_REG]);
+    PUTDATA(curr, uint32_t, g_dev.rdram.regs[0][RDRAM_REF_ROW_REG]);
+    PUTDATA(curr, uint32_t, g_dev.rdram.regs[0][RDRAM_RAS_INTERVAL_REG]);
+    PUTDATA(curr, uint32_t, g_dev.rdram.regs[0][RDRAM_MIN_INTERVAL_REG]);
+    PUTDATA(curr, uint32_t, g_dev.rdram.regs[0][RDRAM_ADDR_SELECT_REG]);
+    PUTDATA(curr, uint32_t, g_dev.rdram.regs[0][RDRAM_DEVICE_MANUF_REG]);
 
     PUTDATA(curr, uint32_t, 0); // Padding from old implementation
-    PUTDATA(curr, uint32_t, g_dev.r4300.mi.regs[MI_INIT_MODE_REG]);
-    PUTDATA(curr, uint8_t,  g_dev.r4300.mi.regs[MI_INIT_MODE_REG] & 0x7F);
-    PUTDATA(curr, uint8_t, (g_dev.r4300.mi.regs[MI_INIT_MODE_REG] & 0x80) != 0);
-    PUTDATA(curr, uint8_t, (g_dev.r4300.mi.regs[MI_INIT_MODE_REG] & 0x100) != 0);
-    PUTDATA(curr, uint8_t, (g_dev.r4300.mi.regs[MI_INIT_MODE_REG] & 0x200) != 0);
-    PUTDATA(curr, uint32_t, g_dev.r4300.mi.regs[MI_VERSION_REG]);
-    PUTDATA(curr, uint32_t, g_dev.r4300.mi.regs[MI_INTR_REG]);
-    PUTDATA(curr, uint32_t, g_dev.r4300.mi.regs[MI_INTR_MASK_REG]);
+    PUTDATA(curr, uint32_t, g_dev.mi.regs[MI_INIT_MODE_REG]);
+    PUTDATA(curr, uint8_t,  g_dev.mi.regs[MI_INIT_MODE_REG] & 0x7F);
+    PUTDATA(curr, uint8_t, (g_dev.mi.regs[MI_INIT_MODE_REG] & 0x80) != 0);
+    PUTDATA(curr, uint8_t, (g_dev.mi.regs[MI_INIT_MODE_REG] & 0x100) != 0);
+    PUTDATA(curr, uint8_t, (g_dev.mi.regs[MI_INIT_MODE_REG] & 0x200) != 0);
+    PUTDATA(curr, uint32_t, g_dev.mi.regs[MI_VERSION_REG]);
+    PUTDATA(curr, uint32_t, g_dev.mi.regs[MI_INTR_REG]);
+    PUTDATA(curr, uint32_t, g_dev.mi.regs[MI_INTR_MASK_REG]);
     PUTDATA(curr, uint32_t, 0); //Padding from old implementation
-    PUTDATA(curr, uint8_t, (g_dev.r4300.mi.regs[MI_INTR_MASK_REG] & 0x1) != 0);
-    PUTDATA(curr, uint8_t, (g_dev.r4300.mi.regs[MI_INTR_MASK_REG] & 0x2) != 0);
-    PUTDATA(curr, uint8_t, (g_dev.r4300.mi.regs[MI_INTR_MASK_REG] & 0x4) != 0);
-    PUTDATA(curr, uint8_t, (g_dev.r4300.mi.regs[MI_INTR_MASK_REG] & 0x8) != 0);
-    PUTDATA(curr, uint8_t, (g_dev.r4300.mi.regs[MI_INTR_MASK_REG] & 0x10) != 0);
-    PUTDATA(curr, uint8_t, (g_dev.r4300.mi.regs[MI_INTR_MASK_REG] & 0x20) != 0);
+    PUTDATA(curr, uint8_t, (g_dev.mi.regs[MI_INTR_MASK_REG] & 0x1) != 0);
+    PUTDATA(curr, uint8_t, (g_dev.mi.regs[MI_INTR_MASK_REG] & 0x2) != 0);
+    PUTDATA(curr, uint8_t, (g_dev.mi.regs[MI_INTR_MASK_REG] & 0x4) != 0);
+    PUTDATA(curr, uint8_t, (g_dev.mi.regs[MI_INTR_MASK_REG] & 0x8) != 0);
+    PUTDATA(curr, uint8_t, (g_dev.mi.regs[MI_INTR_MASK_REG] & 0x10) != 0);
+    PUTDATA(curr, uint8_t, (g_dev.mi.regs[MI_INTR_MASK_REG] & 0x20) != 0);
     PUTDATA(curr, uint16_t, 0); // Padding from old implementation
 
     PUTDATA(curr, uint32_t, g_dev.pi.regs[PI_DRAM_ADDR_REG]);
@@ -1384,15 +1437,16 @@ int savestates_save_m64p(char *filepath)
     PUTDATA(curr, uint32_t, g_dev.dp.dps_regs[DPS_BUFTEST_ADDR_REG]);
     PUTDATA(curr, uint32_t, g_dev.dp.dps_regs[DPS_BUFTEST_DATA_REG]);
 
-    PUTARRAY(g_dev.ri.rdram.dram, curr, uint32_t, RDRAM_MAX_SIZE/4);
+    PUTARRAY(g_dev.rdram.dram, curr, uint32_t, RDRAM_MAX_SIZE/4);
     PUTARRAY(g_dev.sp.mem, curr, uint32_t, SP_MEM_SIZE/4);
-    PUTARRAY(g_dev.si.pif.ram, curr, uint8_t, PIF_RAM_SIZE);
+    PUTARRAY(g_dev.pif.ram, curr, uint8_t, PIF_RAM_SIZE);
 
-    PUTDATA(curr, int, g_dev.pi.use_flashram);
-    PUTDATA(curr, int, g_dev.pi.flashram.mode);
-    PUTDATA(curr, unsigned long long, g_dev.pi.flashram.status);
-    PUTDATA(curr, unsigned int, g_dev.pi.flashram.erase_offset);
-    PUTDATA(curr, unsigned int, g_dev.pi.flashram.write_pointer);
+    PUTDATA(curr, int, g_dev.cart.use_flashram);
+    PUTDATA(curr, int, g_dev.cart.flashram.mode);
+    flashram_status = ((uint64_t)g_dev.cart.flashram.status[0] << 32) | g_dev.cart.flashram.status[1];
+    PUTDATA(curr, unsigned long long, flashram_status);
+    PUTDATA(curr, unsigned int, g_dev.cart.flashram.erase_offset);
+    PUTDATA(curr, unsigned int, g_dev.cart.flashram.write_pointer);
 
     PUTARRAY(g_dev.r4300.cp0.tlb.LUT_r, curr, unsigned int, 0x100000);
     PUTARRAY(g_dev.r4300.cp0.tlb.LUT_w, curr, unsigned int, 0x100000);
@@ -1452,57 +1506,76 @@ int savestates_save_m64p(char *filepath)
     PUTDATA(curr, uint32_t, g_dev.ai.last_read);
     PUTDATA(curr, uint32_t, g_dev.ai.delayed_carry);
 
-    PUTDATA(curr, uint32_t, g_dev.pi.cart_rom.last_write);
-    PUTDATA(curr, uint32_t, g_dev.pi.cart_rom.rom_written);
+    PUTDATA(curr, uint32_t, g_dev.cart.cart_rom.last_write);
+    PUTDATA(curr, uint32_t, g_dev.cart.cart_rom.rom_written);
 
     PUTDATA(curr, uint32_t, g_dev.sp.rsp_task_locked);
 
-    PUTDATA(curr, uint16_t, g_dev.si.pif.af_rtc.control);
-    PUTDATA(curr, int64_t, g_dev.si.pif.af_rtc.now);
-    PUTDATA(curr, int64_t, g_dev.si.pif.af_rtc.last_update_rtc);
+    PUTDATA(curr, uint16_t, g_dev.cart.af_rtc.control);
+    PUTDATA(curr, int64_t, g_dev.cart.af_rtc.now);
+    PUTDATA(curr, int64_t, g_dev.cart.af_rtc.last_update_rtc);
 
     for (i = 0; i < GAME_CONTROLLERS_COUNT; ++i) {
-        PUTDATA(curr, uint8_t, g_dev.si.pif.controllers[i].status);
+        PUTDATA(curr, uint8_t, g_dev.controllers[i].status);
     }
 
     for (i = 0; i < GAME_CONTROLLERS_COUNT; ++i) {
-        PUTDATA(curr, uint8_t, g_dev.si.pif.controllers[i].rumblepak.state);
+        PUTDATA(curr, uint8_t, g_dev.rumblepaks[i].state);
     }
 
     for (i = 0; i < GAME_CONTROLLERS_COUNT; ++i) {
-        PUTDATA(curr, unsigned int, g_dev.si.pif.controllers[i].transferpak.enabled);
-        PUTDATA(curr, unsigned int, g_dev.si.pif.controllers[i].transferpak.bank);
-        PUTDATA(curr, unsigned int, g_dev.si.pif.controllers[i].transferpak.access_mode);
-        PUTDATA(curr, unsigned int, g_dev.si.pif.controllers[i].transferpak.access_mode_changed);
+        PUTDATA(curr, unsigned int, g_dev.transferpaks[i].enabled);
+        PUTDATA(curr, unsigned int, g_dev.transferpaks[i].bank);
+        PUTDATA(curr, unsigned int, g_dev.transferpaks[i].access_mode);
+        PUTDATA(curr, unsigned int, g_dev.transferpaks[i].access_mode_changed);
 
-        if (g_dev.si.pif.controllers[i].transferpak.gb_cart == NULL) {
+        if (g_dev.transferpaks[i].gb_cart == NULL) {
             uint8_t gb_fingerprint[GB_CART_FINGERPRINT_SIZE];
             memset(gb_fingerprint, 0, GB_CART_FINGERPRINT_SIZE);
             PUTARRAY(gb_fingerprint, curr, uint8_t, GB_CART_FINGERPRINT_SIZE);
         }
         else {
-            PUTARRAY(g_dev.si.pif.controllers[i].transferpak.gb_cart->rom.data + GB_CART_FINGERPRINT_OFFSET, curr, uint8_t, GB_CART_FINGERPRINT_SIZE);
+            uint8_t* rom = g_dev.transferpaks[i].gb_cart->irom_storage->data(g_dev.transferpaks[i].gb_cart->rom_storage);
+            PUTARRAY(rom + GB_CART_FINGERPRINT_OFFSET, curr, uint8_t, GB_CART_FINGERPRINT_SIZE);
 
-            PUTDATA(curr, unsigned int, g_dev.si.pif.controllers[i].transferpak.gb_cart->rom_bank);
-            PUTDATA(curr, unsigned int, g_dev.si.pif.controllers[i].transferpak.gb_cart->ram_bank);
-            PUTDATA(curr, unsigned int, g_dev.si.pif.controllers[i].transferpak.gb_cart->ram_enable);
-            PUTDATA(curr, unsigned int, g_dev.si.pif.controllers[i].transferpak.gb_cart->mbc1_mode);
+            PUTDATA(curr, unsigned int, g_dev.transferpaks[i].gb_cart->rom_bank);
+            PUTDATA(curr, unsigned int, g_dev.transferpaks[i].gb_cart->ram_bank);
+            PUTDATA(curr, unsigned int, g_dev.transferpaks[i].gb_cart->ram_enable);
+            PUTDATA(curr, unsigned int, g_dev.transferpaks[i].gb_cart->mbc1_mode);
 
-            PUTARRAY(g_dev.si.pif.controllers[i].transferpak.gb_cart->rtc.regs, curr, uint8_t, MBC3_RTC_REGS_COUNT);
-            PUTDATA(curr, unsigned int, g_dev.si.pif.controllers[i].transferpak.gb_cart->rtc.latch);
-            PUTARRAY(g_dev.si.pif.controllers[i].transferpak.gb_cart->rtc.latched_regs, curr, uint8_t, MBC3_RTC_REGS_COUNT);
-            PUTDATA(curr, int64_t, g_dev.si.pif.controllers[i].transferpak.gb_cart->rtc.last_time);
+            PUTARRAY(g_dev.transferpaks[i].gb_cart->rtc.regs, curr, uint8_t, MBC3_RTC_REGS_COUNT);
+            PUTDATA(curr, unsigned int, g_dev.transferpaks[i].gb_cart->rtc.latch);
+            PUTARRAY(g_dev.transferpaks[i].gb_cart->rtc.latched_regs, curr, uint8_t, MBC3_RTC_REGS_COUNT);
+            PUTDATA(curr, int64_t, g_dev.transferpaks[i].gb_cart->rtc.last_time);
+
+            PUTARRAY(g_dev.transferpaks[i].gb_cart->cam.regs, curr, uint8_t, M64282FP_REGS_COUNT);
         }
     }
 
     for (i = 0; i < PIF_CHANNELS_COUNT; ++i) {
-       PUTDATA(curr, int8_t, (g_dev.si.pif.channels[i].tx == NULL)
+       PUTDATA(curr, int8_t, (g_dev.pif.channels[i].tx == NULL)
                ? (int8_t)-1
-               : (int8_t)(g_dev.si.pif.channels[i].tx - g_dev.si.pif.ram));
+               : (int8_t)(g_dev.pif.channels[i].tx - g_dev.pif.ram));
     }
 
     PUTDATA(curr, unsigned int, g_dev.vi.count_per_scanline);
 
+    PUTDATA(curr, uint8_t, g_dev.si.dma_dir);
+
+    PUTDATA(curr, uint8_t, g_dev.dp.do_on_unfreeze);
+
+    for (i = 1; i < RDRAM_MAX_MODULES_COUNT; ++i) {
+        PUTDATA(curr, uint32_t, g_dev.rdram.regs[i][RDRAM_CONFIG_REG]);
+        PUTDATA(curr, uint32_t, g_dev.rdram.regs[i][RDRAM_DEVICE_ID_REG]);
+        PUTDATA(curr, uint32_t, g_dev.rdram.regs[i][RDRAM_DELAY_REG]);
+        PUTDATA(curr, uint32_t, g_dev.rdram.regs[i][RDRAM_MODE_REG]);
+        PUTDATA(curr, uint32_t, g_dev.rdram.regs[i][RDRAM_REF_INTERVAL_REG]);
+        PUTDATA(curr, uint32_t, g_dev.rdram.regs[i][RDRAM_REF_ROW_REG]);
+        PUTDATA(curr, uint32_t, g_dev.rdram.regs[i][RDRAM_RAS_INTERVAL_REG]);
+        PUTDATA(curr, uint32_t, g_dev.rdram.regs[i][RDRAM_MIN_INTERVAL_REG]);
+        PUTDATA(curr, uint32_t, g_dev.rdram.regs[i][RDRAM_ADDR_SELECT_REG]);
+        PUTDATA(curr, uint32_t, g_dev.rdram.regs[i][RDRAM_DEVICE_MANUF_REG]);
+    }
 
     init_work(&save->work, savestates_save_m64p_work);
     queue_work(&save->work);
@@ -1533,7 +1606,7 @@ static int savestates_save_pj64(char *filepath, void *handle,
     // Write the save state data in memory
     PUTARRAY(pj64_magic, curr, unsigned char, 4);
     PUTDATA(curr, unsigned int, SaveRDRAMSize);
-    PUTARRAY(g_dev.pi.cart_rom.rom, curr, unsigned int, 0x40/4);
+    PUTARRAY(g_dev.cart.cart_rom.rom, curr, unsigned int, 0x40/4);
     PUTDATA(curr, uint32_t, get_event(&g_dev.r4300.cp0.q, VI_INT) - cp0_regs[CP0_COUNT_REG]); // vi_timer
     PUTDATA(curr, uint32_t, *r4300_pc(&g_dev.r4300));
     PUTARRAY(r4300_regs(&g_dev.r4300), curr, int64_t, 32);
@@ -1547,16 +1620,16 @@ static int savestates_save_pj64(char *filepath, void *handle,
     PUTDATA(curr, int64_t, *r4300_mult_hi(&g_dev.r4300));
     PUTDATA(curr, int64_t, *r4300_mult_lo(&g_dev.r4300));
 
-    PUTDATA(curr, uint32_t, g_dev.ri.rdram.regs[RDRAM_CONFIG_REG]);
-    PUTDATA(curr, uint32_t, g_dev.ri.rdram.regs[RDRAM_DEVICE_ID_REG]);
-    PUTDATA(curr, uint32_t, g_dev.ri.rdram.regs[RDRAM_DELAY_REG]);
-    PUTDATA(curr, uint32_t, g_dev.ri.rdram.regs[RDRAM_MODE_REG]);
-    PUTDATA(curr, uint32_t, g_dev.ri.rdram.regs[RDRAM_REF_INTERVAL_REG]);
-    PUTDATA(curr, uint32_t, g_dev.ri.rdram.regs[RDRAM_REF_ROW_REG]);
-    PUTDATA(curr, uint32_t, g_dev.ri.rdram.regs[RDRAM_RAS_INTERVAL_REG]);
-    PUTDATA(curr, uint32_t, g_dev.ri.rdram.regs[RDRAM_MIN_INTERVAL_REG]);
-    PUTDATA(curr, uint32_t, g_dev.ri.rdram.regs[RDRAM_ADDR_SELECT_REG]);
-    PUTDATA(curr, uint32_t, g_dev.ri.rdram.regs[RDRAM_DEVICE_MANUF_REG]);
+    PUTDATA(curr, uint32_t, g_dev.rdram.regs[0][RDRAM_CONFIG_REG]);
+    PUTDATA(curr, uint32_t, g_dev.rdram.regs[0][RDRAM_DEVICE_ID_REG]);
+    PUTDATA(curr, uint32_t, g_dev.rdram.regs[0][RDRAM_DELAY_REG]);
+    PUTDATA(curr, uint32_t, g_dev.rdram.regs[0][RDRAM_MODE_REG]);
+    PUTDATA(curr, uint32_t, g_dev.rdram.regs[0][RDRAM_REF_INTERVAL_REG]);
+    PUTDATA(curr, uint32_t, g_dev.rdram.regs[0][RDRAM_REF_ROW_REG]);
+    PUTDATA(curr, uint32_t, g_dev.rdram.regs[0][RDRAM_RAS_INTERVAL_REG]);
+    PUTDATA(curr, uint32_t, g_dev.rdram.regs[0][RDRAM_MIN_INTERVAL_REG]);
+    PUTDATA(curr, uint32_t, g_dev.rdram.regs[0][RDRAM_ADDR_SELECT_REG]);
+    PUTDATA(curr, uint32_t, g_dev.rdram.regs[0][RDRAM_DEVICE_MANUF_REG]);
 
     PUTDATA(curr, uint32_t, g_dev.sp.regs[SP_MEM_ADDR_REG]);
     PUTDATA(curr, uint32_t, g_dev.sp.regs[SP_DRAM_ADDR_REG]);
@@ -1581,10 +1654,10 @@ static int savestates_save_pj64(char *filepath, void *handle,
     PUTDATA(curr, unsigned int, 0); // ?
     PUTDATA(curr, unsigned int, 0); // ?
 
-    PUTDATA(curr, uint32_t, g_dev.r4300.mi.regs[MI_INIT_MODE_REG]); //TODO Secial handling in pj64
-    PUTDATA(curr, uint32_t, g_dev.r4300.mi.regs[MI_VERSION_REG]);
-    PUTDATA(curr, uint32_t, g_dev.r4300.mi.regs[MI_INTR_REG]);
-    PUTDATA(curr, uint32_t, g_dev.r4300.mi.regs[MI_INTR_MASK_REG]);
+    PUTDATA(curr, uint32_t, g_dev.mi.regs[MI_INIT_MODE_REG]); //TODO Secial handling in pj64
+    PUTDATA(curr, uint32_t, g_dev.mi.regs[MI_VERSION_REG]);
+    PUTDATA(curr, uint32_t, g_dev.mi.regs[MI_INTR_REG]);
+    PUTDATA(curr, uint32_t, g_dev.mi.regs[MI_INTR_MASK_REG]);
 
     PUTDATA(curr, uint32_t, g_dev.vi.regs[VI_STATUS_REG]);
     PUTDATA(curr, uint32_t, g_dev.vi.regs[VI_ORIGIN_REG]);
@@ -1657,9 +1730,9 @@ static int savestates_save_pj64(char *filepath, void *handle,
         PUTDATA(curr, unsigned int, MyEntryLo1);
     }
 
-    PUTARRAY(g_dev.si.pif.ram, curr, uint8_t, PIF_RAM_SIZE);
+    PUTARRAY(g_dev.pif.ram, curr, uint8_t, PIF_RAM_SIZE);
 
-    PUTARRAY(g_dev.ri.rdram.dram, curr, uint32_t, SaveRDRAMSize/4);
+    PUTARRAY(g_dev.rdram.dram, curr, uint32_t, SaveRDRAMSize/4);
     PUTARRAY(g_dev.sp.mem, curr, uint32_t, SP_MEM_SIZE/4);
 
     // Write the save state data to the output
@@ -1779,19 +1852,15 @@ int savestates_save(void)
 
 void savestates_init(void)
 {
-#ifdef USE_SDL
     savestates_lock = SDL_CreateMutex();
     if (!savestates_lock) {
         DebugMessage(M64MSG_ERROR, "Could not create savestates list lock");
         return;
     }
-#endif
 }
 
 void savestates_deinit(void)
 {
-#ifdef USE_SDL
     SDL_DestroyMutex(savestates_lock);
-#endif
     savestates_clear_job();
 }

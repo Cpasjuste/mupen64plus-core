@@ -27,10 +27,7 @@
 
 #include "api/m64p_types.h"
 #include "device/device.h"
-#include "device/si/pif.h"
 #include "osal/preproc.h"
-
-enum { RDRAM_MAX_SIZE = 0x800000 };
 
 /* globals */
 extern m64p_handle g_CoreConfig;
@@ -39,11 +36,11 @@ extern int g_MemHasBeenBSwapped;
 extern int g_EmulatorRunning;
 extern int g_rom_pause;
 
-extern void* g_rdram;
+extern void* g_mem_base;
 
 extern struct device g_dev;
 
-extern char* g_gb_rom_files[GAME_CONTROLLERS_COUNT];
+extern m64p_media_loader g_media_loader;
 
 extern m64p_frame_callback g_FrameCallback;
 
@@ -54,6 +51,10 @@ const char* get_savesrampath(void);
 
 void new_frame(void);
 void new_vi(void);
+
+void main_switch_next_pak(int control_id);
+void main_switch_plugin_pak(int control_id);
+void main_change_gb_cart(int control_id);
 
 int  main_set_core_defaults(void);
 void main_message(m64p_msg_level level, unsigned int osd_corner, const char *format, ...);

@@ -22,10 +22,8 @@
 
 // gameshark and xploder64 reference: http://doc.kodewerx.net/hacking_n64.html 
 
-#ifdef USE_SDL
 #include <SDL.h>
 #include <SDL_thread.h>
-#endif
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -47,13 +45,12 @@
 #include <inttypes.h>
 
 // local definitions
-#define CHEAT_CODE_MAGIC_VALUE 0xDEAD0000
-#define ARRAY_SIZE(x) (sizeof(x)/sizeof(x[0]))
+#define CHEAT_CODE_MAGIC_VALUE UINT32_C(0xDEAD0000)
 
 typedef struct cheat_code {
-    unsigned int address;
-    int value;
-    int old_value;
+    uint32_t address;
+    uint32_t value;
+    uint32_t old_value;
     struct list_head list;
 } cheat_code_t;
 
@@ -67,51 +64,49 @@ typedef struct cheat {
 
 // local variables
 static LIST_HEAD(active_cheats);
-#ifdef USE_SDL
 static SDL_mutex *cheat_mutex = NULL;
-#endif
 
 // private functions
-static unsigned short read_address_16bit(unsigned int address)
+static uint16_t read_address_16bit(uint32_t address)
 {
-    return *(unsigned short *)(((unsigned char*)g_dev.ri.rdram.dram + ((address & 0xFFFFFF)^S16)));
+    return *(uint16_t*)(((unsigned char*)g_dev.rdram.dram + ((address & 0xFFFFFF)^S16)));
 }
 
-static unsigned char read_address_8bit(unsigned int address)
+static uint8_t read_address_8bit(uint32_t address)
 {
-    return *(unsigned char *)(((unsigned char*)g_dev.ri.rdram.dram + ((address & 0xFFFFFF)^S8)));
+    return *(uint8_t*)(((unsigned char*)g_dev.rdram.dram + ((address & 0xFFFFFF)^S8)));
 }
 
-static void update_address_16bit(unsigned int address, unsigned short new_value)
+static void update_address_16bit(uint32_t address, uint16_t new_value)
 {
-    *(unsigned short *)(((unsigned char*)g_dev.ri.rdram.dram + ((address & 0xFFFFFF)^S16))) = new_value;
+    *(uint16_t*)(((unsigned char*)g_dev.rdram.dram + ((address & 0xFFFFFF)^S16))) = new_value;
     address &= 0xfeffffff;  // mask out bit 24 which is used by GS codes to specify 8/16 bits
     invalidate_r4300_cached_code(&g_dev.r4300, address, 2);
 }
 
-static void update_address_8bit(unsigned int address, unsigned char new_value)
+static void update_address_8bit(uint32_t address, uint8_t new_value)
 {
-    *(unsigned char *)(((unsigned char*)g_dev.ri.rdram.dram + ((address & 0xFFFFFF)^S8))) = new_value;
+    *(uint8_t*)(((unsigned char*)g_dev.rdram.dram + ((address & 0xFFFFFF)^S8))) = new_value;
     invalidate_r4300_cached_code(&g_dev.r4300, address, 1);
 }
 
-static int address_equal_to_8bit(unsigned int address, unsigned char value)
+static int address_equal_to_8bit(uint32_t address, uint8_t value)
 {
-    unsigned char value_read;
-    value_read = *(unsigned char *)(((unsigned char*)g_dev.ri.rdram.dram + ((address & 0xFFFFFF)^S8)));
+    uint8_t value_read;
+    value_read = *(uint8_t*)(((unsigned char*)g_dev.rdram.dram + ((address & 0xFFFFFF)^S8)));
     return value_read == value;
 }
 
-static int address_equal_to_16bit(unsigned int address, unsigned short value)
+static int address_equal_to_16bit(uint32_t address, uint16_t value)
 {
-    unsigned short value_read;
-    value_read = *(unsigned short *)(((unsigned char*)g_dev.ri.rdram.dram + ((address & 0xFFFFFF)^S16)));
+    uint16_t value_read;
+    value_read = *(unsigned short *)(((unsigned char*)g_dev.rdram.dram + ((address & 0xFFFFFF)^S16)));
     return value_read == value;
 }
 
 // individual application - returns 0 if we are supposed to skip the next cheat
 // (only really used on conditional codes)
-static int execute_cheat(unsigned int address, unsigned short value, int *old_value)
+static int execute_cheat(uint32_t address, uint32_t value, uint32_t* old_value)
 {
     switch (address & 0xFF000000)
     {
@@ -121,9 +116,9 @@ static int execute_cheat(unsigned int address, unsigned short value, int *old_va
         case 0xA8000000:
         case 0xF0000000:
             // if pointer to old value is valid and uninitialized, write current value to it
-            if(old_value && (*old_value == CHEAT_CODE_MAGIC_VALUE))
-                *old_value = (int) read_address_8bit(address);
-            update_address_8bit(address,(unsigned char) value);
+            if (old_value && (*old_value == CHEAT_CODE_MAGIC_VALUE))
+                *old_value = read_address_8bit(address);
+            update_address_8bit(address, (uint8_t)value);
             return 1;
         case 0x81000000:
         case 0x89000000:
@@ -131,22 +126,22 @@ static int execute_cheat(unsigned int address, unsigned short value, int *old_va
         case 0xA9000000:
         case 0xF1000000:
             // if pointer to old value is valid and uninitialized, write current value to it
-            if(old_value && (*old_value == CHEAT_CODE_MAGIC_VALUE))
-                *old_value = (int) read_address_16bit(address);
-            update_address_16bit(address,value);
+            if (old_value && (*old_value == CHEAT_CODE_MAGIC_VALUE))
+                *old_value = read_address_16bit(address);
+            update_address_16bit(address, (uint16_t)value);
             return 1;
         case 0xD0000000:
         case 0xD8000000:
-            return address_equal_to_8bit(address,(unsigned char) value);
+            return address_equal_to_8bit(address, (uint8_t)value);
         case 0xD1000000:
         case 0xD9000000:
-            return address_equal_to_16bit(address,value);
+            return address_equal_to_16bit(address, (uint16_t)value);
         case 0xD2000000:
         case 0xDB000000:
-            return !(address_equal_to_8bit(address,(unsigned char) value));
+            return !(address_equal_to_8bit(address, (uint8_t)value));
         case 0xD3000000:
         case 0xDA000000:
-            return !(address_equal_to_16bit(address,value));
+            return !(address_equal_to_16bit(address, (uint16_t)value));
         case 0xEE000000:
             // most likely, this doesnt do anything.
             execute_cheat(0xF1000318, 0x0040, NULL);
@@ -199,18 +194,14 @@ static cheat_t *find_or_create_cheat(const char *name)
 // public functions
 void cheat_init(void)
 {
-#if USE_SDL
     cheat_mutex = SDL_CreateMutex();
-#endif
 }
 
 void cheat_uninit(void)
 {
-#ifdef USE_SDL
     if (cheat_mutex != NULL)
         SDL_DestroyMutex(cheat_mutex);
     cheat_mutex = NULL;
-#endif
 }
 
 void cheat_apply_cheats(int entry)
@@ -222,13 +213,11 @@ void cheat_apply_cheats(int entry)
     if (list_empty(&active_cheats))
         return;
 
-#ifdef USE_SDL
     if (cheat_mutex == NULL || SDL_LockMutex(cheat_mutex) != 0)
     {
         DebugMessage(M64MSG_ERROR, "Internal error: failed to lock mutex in cheat_apply_cheats()");
         return;
     }
-#endif
 
     list_for_each_entry_t(cheat, &active_cheats, cheat_t, list) {
         if (cheat->enabled)
@@ -318,9 +307,7 @@ void cheat_apply_cheats(int entry)
         }
     }
 
-#ifdef USE_SDL
     SDL_UnlockMutex(cheat_mutex);
-#endif
 }
 
 
@@ -332,13 +319,11 @@ void cheat_delete_all(void)
     if (list_empty(&active_cheats))
         return;
 
-#ifdef USE_SDL
     if (cheat_mutex == NULL || SDL_LockMutex(cheat_mutex) != 0)
     {
         DebugMessage(M64MSG_ERROR, "Internal error: failed to lock mutex in cheat_delete_all()");
         return;
     }
-#endif
 
     list_for_each_entry_safe_t(cheat, safe_cheat, &active_cheats, cheat_t, list) {
         free(cheat->name);
@@ -351,9 +336,7 @@ void cheat_delete_all(void)
         free(cheat);
     }
 
-#ifdef USE_SDL
     SDL_UnlockMutex(cheat_mutex);
-#endif
 }
 
 int cheat_set_enabled(const char *name, int enabled)
@@ -363,28 +346,22 @@ int cheat_set_enabled(const char *name, int enabled)
     if (list_empty(&active_cheats))
         return 0;
 
-#ifdef USE_SDL
     if (cheat_mutex == NULL || SDL_LockMutex(cheat_mutex) != 0)
     {
         DebugMessage(M64MSG_ERROR, "Internal error: failed to lock mutex in cheat_set_enabled()");
         return 0;
     }
-#endif
 
     list_for_each_entry_t(cheat, &active_cheats, cheat_t, list) {
         if (strcmp(name, cheat->name) == 0)
         {
             cheat->enabled = enabled;
-#ifdef USE_SDL
             SDL_UnlockMutex(cheat_mutex);
-#endif
             return 1;
         }
     }
 
-#ifdef USE_SDL
     SDL_UnlockMutex(cheat_mutex);
-#endif
     return 0;
 }
 
@@ -393,21 +370,17 @@ int cheat_add_new(const char *name, m64p_cheat_code *code_list, int num_codes)
     cheat_t *cheat;
     int i, j;
 
-#ifdef USE_SDL
     if (cheat_mutex == NULL || SDL_LockMutex(cheat_mutex) != 0)
     {
         DebugMessage(M64MSG_ERROR, "Internal error: failed to lock mutex in cheat_add_new()");
         return 0;
     }
-#endif
 
     /* create a new cheat function or erase the codes in an existing cheat function */
     cheat = find_or_create_cheat(name);
     if (cheat == NULL)
     {
-#ifdef USE_SDL
         SDL_UnlockMutex(cheat_mutex);
-#endif
         return 0;
     }
 
@@ -445,9 +418,7 @@ int cheat_add_new(const char *name, m64p_cheat_code *code_list, int num_codes)
         }
     }
 
-#ifdef USE_SDL
     SDL_UnlockMutex(cheat_mutex);
-#endif
     return 1;
 }
 
@@ -502,7 +473,7 @@ static int cheat_parse_hacks_code(char *code, m64p_cheat_code **hack)
         input = NULL;
 
         ret = sscanf(token, "%08" SCNx32 " %04X", &hackbuf[num_codes].address,
-                     &hackbuf[num_codes].value);
+                     (unsigned int*)&hackbuf[num_codes].value);
         if (ret == 2)
             num_codes++;
     }

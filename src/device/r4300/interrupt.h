@@ -30,10 +30,10 @@ struct interrupt_queue;
 
 void init_interrupt(struct cp0* cp0);
 
-void raise_maskable_interrupt(struct r4300_core* r4300, uint32_t cause);
+void raise_maskable_interrupt(struct r4300_core* r4300, uint32_t cause_ip);
 
 void gen_interrupt(struct r4300_core* r4300);
-void check_interrupt(struct r4300_core* r4300);
+void r4300_check_interrupt(struct r4300_core* r4300, uint32_t cause_ip, int set_cause);
 
 void translate_event_queue(struct cp0* cp0, unsigned int base);
 void remove_event(struct interrupt_queue* q, int type);
@@ -41,6 +41,7 @@ void add_interrupt_event_count(struct cp0* cp0, int type, unsigned int count);
 void add_interrupt_event(struct cp0* cp0, int type, unsigned int delay);
 unsigned int get_event(const struct interrupt_queue* q, int type);
 int get_next_event_type(const struct interrupt_queue* q);
+unsigned int add_random_interrupt_time(struct r4300_core* r4300);
 
 int save_eventqueue_infos(struct cp0* cp0, char *buf);
 void load_eventqueue_infos(struct cp0* cp0, const char *buf);
@@ -50,7 +51,6 @@ void reset_hard_handler(void* opaque);
 void compare_int_handler(void* opaque);
 void check_int_handler(void* opaque);
 void special_int_handler(void* opaque);
-void hw2_int_handler(void* opaque);
 void nmi_int_handler(void* opaque);
 
 #define VI_INT      0x001
