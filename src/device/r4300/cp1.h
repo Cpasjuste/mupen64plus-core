@@ -1,6 +1,6 @@
 /* * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * *
  *   Mupen64plus - cp1.h                                                   *
- *   Mupen64Plus homepage: http://code.google.com/p/mupen64plus/           *
+ *   Mupen64Plus homepage: https://mupen64plus.org/                        *
  *   Copyright (C) 2002 Hacktarux                                          *
  *                                                                         *
  *   This program is free software; you can redistribute it and/or modify  *
@@ -56,6 +56,46 @@ struct cp1
     struct new_dynarec_hot_state* new_dynarec_hot_state;
 #endif
 };
+
+#if NEW_DYNAREC != NEW_DYNAREC_ARM
+#define R4300_CP1_REGS_S_OFFSET (\
+    offsetof(struct r4300_core, cp1) + \
+    offsetof(struct cp1, regs_simple))
+#else
+#define R4300_CP1_REGS_S_OFFSET (\
+    offsetof(struct r4300_core, new_dynarec_hot_state) + \
+    offsetof(struct new_dynarec_hot_state, cp1_regs_simple))
+#endif
+
+#if NEW_DYNAREC != NEW_DYNAREC_ARM
+#define R4300_CP1_REGS_D_OFFSET (\
+    offsetof(struct r4300_core, cp1) + \
+    offsetof(struct cp1, regs_double))
+#else
+#define R4300_CP1_REGS_D_OFFSET (\
+    offsetof(struct r4300_core, new_dynarec_hot_state) + \
+    offsetof(struct new_dynarec_hot_state, cp1_regs_double))
+#endif
+
+#if NEW_DYNAREC != NEW_DYNAREC_ARM
+#define R4300_CP1_FCR0_OFFSET (\
+    offsetof(struct r4300_core, cp1) + \
+    offsetof(struct cp1, fcr0))
+#else
+#define R4300_CP1_FCR0_OFFSET (\
+    offsetof(struct r4300_core, new_dynarec_hot_state) + \
+    offsetof(struct new_dynarec_hot_state, fcr0))
+#endif
+
+#if NEW_DYNAREC != NEW_DYNAREC_ARM
+#define R4300_CP1_FCR31_OFFSET (\
+    offsetof(struct r4300_core, cp1) + \
+    offsetof(struct cp1, fcr31))
+#else
+#define R4300_CP1_FCR31_OFFSET (\
+    offsetof(struct r4300_core, new_dynarec_hot_state) + \
+    offsetof(struct new_dynarec_hot_state, fcr31))
+#endif
 
 void init_cp1(struct cp1* cp1, struct new_dynarec_hot_state* new_dynarec_hot_state);
 void poweron_cp1(struct cp1* cp1);

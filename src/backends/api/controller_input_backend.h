@@ -1,6 +1,6 @@
 /* * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * *
  *   Mupen64plus - controller_input_backend.h                              *
- *   Mupen64Plus homepage: http://code.google.com/p/mupen64plus/           *
+ *   Mupen64Plus homepage: https://mupen64plus.org/                        *
  *   Copyright (C) 2016 Bobby Smiles                                       *
  *                                                                         *
  *   This program is free software; you can redistribute it and/or modify  *
@@ -21,6 +21,8 @@
 
 #ifndef M64P_BACKENDS_API_CONTROLLER_INPUT_BACKEND_H
 #define M64P_BACKENDS_API_CONTROLLER_INPUT_BACKEND_H
+
+#include "api/m64p_types.h"
 
 #include <stdint.h>
 
@@ -54,10 +56,11 @@ enum mouse_controller_input {
 
 struct controller_input_backend_interface
 {
-    /* Returns emulated controller input status (32-bit)
+    /* Get emulated controller input status (32-bit)
      * Encoding of the input status depends on the emulated controller flavor.
+     * Returns M64ERR_SUCCESS on success
      */
-    uint32_t (*get_input)(void* cin);
+    m64p_error (*get_input)(void* cin, uint32_t* input);
 };
 
 #endif

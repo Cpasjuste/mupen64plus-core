@@ -1,6 +1,6 @@
 /* * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * *
  *   Mupen64plus - device.c                                                *
- *   Mupen64Plus homepage: http://code.google.com/p/mupen64plus/           *
+ *   Mupen64Plus homepage: https://mupen64plus.org/                        *
  *   Copyright (C) 2016 Bobby Smiles                                       *
  *                                                                         *
  *   This program is free software; you can redistribute it and/or modify  *
@@ -98,6 +98,8 @@ void init_device(struct device* dev,
     int randomize_interrupt,
     /* ai */
     void* aout, const struct audio_out_backend_interface* iaout,
+    /* si */
+    unsigned int si_dma_duration,
     /* rdram */
     size_t dram_size,
     /* pif */
@@ -175,7 +177,7 @@ void init_device(struct device* dev,
             dev, get_pi_dma_handler,
             &dev->mi, &dev->ri, &dev->dp);
     init_ri(&dev->ri, &dev->rdram);
-    init_si(&dev->si, &dev->mi, &dev->pif, &dev->ri);
+    init_si(&dev->si, si_dma_duration, &dev->mi, &dev->pif, &dev->ri);
     init_vi(&dev->vi, vi_clock, expected_refresh_rate, &dev->mi, &dev->dp);
 
     init_pif(&dev->pif,

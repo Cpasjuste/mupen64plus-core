@@ -30,17 +30,17 @@
 #endif
 
 #include "new_dynarec.h"
+#include "api/m64p_types.h"
+#include "api/callbacks.h"
 #include "main/main.h"
 #include "main/rom.h"
 #include "device/memory/memory.h"
 #include "device/r4300/cached_interp.h"
+#include "device/r4300/cp0.h"
 #include "device/r4300/cp1.h"
 #include "device/r4300/interrupt.h"
-#include "device/r4300/ops.h"
-#include "device/r4300/recomp.h"
 #include "device/r4300/tlb.h"
 #include "device/r4300/fpu.h"
-#include "device/r4300/exception.h"
 #include "device/rcp/mi/mi_controller.h"
 #include "device/rcp/rsp/rsp_core.h"
 
@@ -53,6 +53,7 @@
 #elif NEW_DYNAREC == NEW_DYNAREC_ARM
 #include "arm/arm_cpu_features.h"
 #include "arm/assem_arm.h"
+#define EAX 0 /* ??? required for syscall_assemble and do_ccstub even in ARM mode */
 #else
 #error Unsupported dynarec architecture
 #endif
@@ -186,8 +187,6 @@ void jump_syscall(void);
 void jump_eret(void);
 
 /* interpreted opcode */
-static void div64(int64_t dividend,int64_t divisor);
-static void divu64(uint64_t dividend,uint64_t divisor);
 static uint64_t ldl_merge(uint64_t original,uint64_t loaded,u_int bits);
 static uint64_t ldr_merge(uint64_t original,uint64_t loaded,u_int bits);
 static void TLBWI_new(void);
@@ -272,6 +271,11 @@ static int notcompiledCount = 0;
 static signed char regmap[MAXBLOCK][HOST_REGS];
 static signed char regmap_entry[MAXBLOCK][HOST_REGS];
 #endif
+
+void dynarec_gen_interrupt(void)
+{
+    gen_interrupt(&g_dev.r4300);
+}
 
 static void clear_all_regs(signed char regmap[])
 {
@@ -2783,20 +2787,23 @@ void multdiv_alloc(struct regstat *current,int i)
     }
     else // 64-bit
     {
-      current->u&=~(1LL<<HIREG);
-      current->u&=~(1LL<<LOREG);
-      current->uu&=~(1LL<<HIREG);
-      current->uu&=~(1LL<<LOREG);
+#ifndef INTERPRETED_MULT64
+      if((opcode2[i]==0x1C)||(opcode2[i]==0x1D)) // DMULT/DMULTU
+      {
+        current->u&=~(1LL<<HIREG);
+        current->uu&=~(1LL<<HIREG);
+        current->u&=~(1LL<<LOREG);
+        current->uu&=~(1LL<<LOREG);
+      }
+#endif
       alloc_reg64(current,i,HIREG);
-      //if(HOST_REGS>10) alloc_reg64(current,i,LOREG);
+      alloc_reg64(current,i,LOREG);
       alloc_reg64(current,i,rs1[i]);
       alloc_reg64(current,i,rs2[i]);
-      alloc_all(current,i);
       current->is32&=~(1LL<<HIREG);
       current->is32&=~(1LL<<LOREG);
       dirty_reg(current,HIREG);
       dirty_reg(current,LOREG);
-      minimum_free_regs[i]=HOST_REGS;
     }
   }
   else
@@ -7584,10 +7591,9 @@ void new_dynarec_init(void)
 #endif
   out=(u_char *)base_addr;
 
-  g_dev.r4300.rdword=&g_dev.r4300.new_dynarec_hot_state.rdword;
-  g_dev.r4300.new_dynarec_hot_state.fake_pc.f.r.rs=(long long int *)&g_dev.r4300.new_dynarec_hot_state.rdword;
-  g_dev.r4300.new_dynarec_hot_state.fake_pc.f.r.rt=(long long int *)&g_dev.r4300.new_dynarec_hot_state.rdword;
-  g_dev.r4300.new_dynarec_hot_state.fake_pc.f.r.rd=(long long int *)&g_dev.r4300.new_dynarec_hot_state.rdword;
+  g_dev.r4300.new_dynarec_hot_state.fake_pc.f.r.rs = &g_dev.r4300.new_dynarec_hot_state.rs;
+  g_dev.r4300.new_dynarec_hot_state.fake_pc.f.r.rt = &g_dev.r4300.new_dynarec_hot_state.rt;
+  g_dev.r4300.new_dynarec_hot_state.fake_pc.f.r.rd = &g_dev.r4300.new_dynarec_hot_state.rd;
   int n;
   for(n=0x80000;n<0x80800;n++)
     g_dev.r4300.cached_interp.invalid_code[n]=1;
@@ -10915,21 +10921,6 @@ int new_recompile_block(int addr)
 }
 
 /* interpreted opcode */
-static void div64(int64_t dividend,int64_t divisor)
-{
-  if(divisor) {
-    *r4300_mult_lo(&g_dev.r4300)=dividend/divisor;
-    *r4300_mult_hi(&g_dev.r4300)=dividend%divisor;
-  }
-}
-static void divu64(uint64_t dividend,uint64_t divisor)
-{
-  if(divisor) {
-    *r4300_mult_lo(&g_dev.r4300)=dividend/divisor;
-    *r4300_mult_hi(&g_dev.r4300)=dividend%divisor;
-  }
-}
-
 static uint64_t ldl_merge(uint64_t original,uint64_t loaded,u_int bits)
 {
   if(bits) {
@@ -10977,7 +10968,7 @@ static void TLBWI_new(void)
       g_dev.r4300.new_dynarec_hot_state.memory_map[i]=-1;
     }
   }
-  cached_interpreter_table.TLBWI();
+  cached_interp_TLBWI();
   //DebugMessage(M64MSG_VERBOSE, "TLBWI: index=%d",r4300_cp0_regs(&g_dev.r4300.cp0)[CP0_INDEX_REG]);
   //DebugMessage(M64MSG_VERBOSE, "TLBWI: start_even=%x end_even=%x phys_even=%x v=%d d=%d",g_dev.r4300.cp0.tlb.entries[r4300_cp0_regs(&g_dev.r4300.cp0)[CP0_INDEX_REG]&0x3F].start_even,g_dev.r4300.cp0.tlb.entries[r4300_cp0_regs(&g_dev.r4300.cp0)[CP0_INDEX_REG]&0x3F].end_even,g_dev.r4300.cp0.tlb.entries[r4300_cp0_regs(&g_dev.r4300.cp0)[CP0_INDEX_REG]&0x3F].phys_even,g_dev.r4300.cp0.tlb.entries[r4300_cp0_regs(&g_dev.r4300.cp0)[CP0_INDEX_REG]&0x3F].v_even,g_dev.r4300.cp0.tlb.entries[r4300_cp0_regs(&g_dev.r4300.cp0)[CP0_INDEX_REG]&0x3F].d_even);
   //DebugMessage(M64MSG_VERBOSE, "TLBWI: start_odd=%x end_odd=%x phys_odd=%x v=%d d=%d",g_dev.r4300.cp0.tlb.entries[r4300_cp0_regs(&g_dev.r4300.cp0)[CP0_INDEX_REG]&0x3F].start_odd,g_dev.r4300.cp0.tlb.entries[r4300_cp0_regs(&g_dev.r4300.cp0)[CP0_INDEX_REG]&0x3F].end_odd,g_dev.r4300.cp0.tlb.entries[r4300_cp0_regs(&g_dev.r4300.cp0)[CP0_INDEX_REG]&0x3F].phys_odd,g_dev.r4300.cp0.tlb.entries[r4300_cp0_regs(&g_dev.r4300.cp0)[CP0_INDEX_REG]&0x3F].v_odd,g_dev.r4300.cp0.tlb.entries[r4300_cp0_regs(&g_dev.r4300.cp0)[CP0_INDEX_REG]&0x3F].d_odd);
@@ -11052,7 +11043,7 @@ static void TLBWR_new(void)
       g_dev.r4300.new_dynarec_hot_state.memory_map[i]=-1;
     }
   }
-  cached_interpreter_table.TLBWR();
+  cached_interp_TLBWR();
   /* Combine g_dev.r4300.cp0.tlb.LUT_r, g_dev.r4300.cp0.tlb.LUT_w, and invalid_code into a single table
      for fast look up. */
   for (i=g_dev.r4300.cp0.tlb.entries[r4300_cp0_regs(&g_dev.r4300.cp0)[CP0_RANDOM_REG]&0x3F].start_even>>12; i<=g_dev.r4300.cp0.tlb.entries[r4300_cp0_regs(&g_dev.r4300.cp0)[CP0_RANDOM_REG]&0x3F].end_even>>12; i++)
@@ -11123,9 +11114,9 @@ void read_byte_new(int pcaddr, int count, int diff)
   r4300->new_dynarec_hot_state.pcaddr = pcaddr&~1;
   r4300->delay_slot = pcaddr & 1;
   r4300->new_dynarec_hot_state.pending_exception = 0;
-  unsigned int shift = bshift(*r4300_address(r4300));
-  if (r4300_read_aligned_word(r4300, *r4300_address(r4300), &value)) {
-    *r4300->rdword = (uint64_t)((value >> shift) & 0xff);
+  unsigned int shift = bshift(r4300->new_dynarec_hot_state.address);
+  if (r4300_read_aligned_word(r4300, r4300->new_dynarec_hot_state.address, &value)) {
+    r4300->new_dynarec_hot_state.rdword = (uint64_t)((value >> shift) & 0xff);
   }
   r4300->delay_slot = 0;
 }
@@ -11138,9 +11129,9 @@ void read_hword_new(int pcaddr, int count, int diff)
   r4300->new_dynarec_hot_state.pcaddr = pcaddr&~1;
   r4300->delay_slot = pcaddr & 1;
   r4300->new_dynarec_hot_state.pending_exception = 0;
-  unsigned int shift = hshift(*r4300_address(r4300));
-  if (r4300_read_aligned_word(r4300, *r4300_address(r4300), &value)) {
-    *r4300->rdword = (uint64_t)((value >> shift) & 0xffff);
+  unsigned int shift = hshift(r4300->new_dynarec_hot_state.address);
+  if (r4300_read_aligned_word(r4300, r4300->new_dynarec_hot_state.address, &value)) {
+    r4300->new_dynarec_hot_state.rdword = (uint64_t)((value >> shift) & 0xffff);
   }
   r4300->delay_slot = 0;
 }
@@ -11153,8 +11144,8 @@ void read_word_new(int pcaddr, int count, int diff)
   r4300->new_dynarec_hot_state.pcaddr = pcaddr&~1;
   r4300->delay_slot = pcaddr & 1;
   r4300->new_dynarec_hot_state.pending_exception = 0;
-  if (r4300_read_aligned_word(r4300, *r4300_address(r4300), &value)) {
-    *r4300->rdword = (uint64_t)(value);
+  if (r4300_read_aligned_word(r4300, r4300->new_dynarec_hot_state.address, &value)) {
+    r4300->new_dynarec_hot_state.rdword = (uint64_t)(value);
   }
   r4300->delay_slot = 0;
 }
@@ -11166,7 +11157,7 @@ void read_dword_new(int pcaddr, int count, int diff)
   r4300->new_dynarec_hot_state.pcaddr = pcaddr&~1;
   r4300->delay_slot = pcaddr & 1;
   r4300->new_dynarec_hot_state.pending_exception = 0;
-  r4300_read_aligned_dword(r4300, *r4300_address(r4300), (uint64_t*)r4300->rdword);
+  r4300_read_aligned_dword(r4300, r4300->new_dynarec_hot_state.address, (uint64_t*)&r4300->new_dynarec_hot_state.rdword);
   r4300->delay_slot = 0;
 }
 
@@ -11177,10 +11168,9 @@ void write_byte_new(int pcaddr, int count, int diff)
   r4300->new_dynarec_hot_state.pcaddr = pcaddr&~1;
   r4300->delay_slot = pcaddr & 1;
   r4300->new_dynarec_hot_state.pending_exception = 0;
-  unsigned int shift = bshift(*r4300_address(r4300));
-  *r4300_wword(r4300) <<= shift;
-  *r4300_wmask(r4300) = UINT32_C(0xff) << shift;
-  r4300_write_aligned_word(r4300, *r4300_address(r4300), *r4300_wword(r4300), *r4300_wmask(r4300));
+  unsigned int shift = bshift(r4300->new_dynarec_hot_state.address);
+  r4300->new_dynarec_hot_state.wword <<= shift;
+  r4300_write_aligned_word(r4300, r4300->new_dynarec_hot_state.address, r4300->new_dynarec_hot_state.wword, UINT32_C(0xff) << shift);
   r4300->delay_slot = 0;
   r4300->new_dynarec_hot_state.last_count = *r4300_cp0_next_interrupt(&r4300->cp0);
   r4300->new_dynarec_hot_state.cycle_count = r4300_cp0_regs(&r4300->cp0)[CP0_COUNT_REG] - r4300->new_dynarec_hot_state.last_count - diff;
@@ -11193,10 +11183,9 @@ void write_hword_new(int pcaddr, int count, int diff)
   r4300->new_dynarec_hot_state.pcaddr = pcaddr&~1;
   r4300->delay_slot = pcaddr & 1;
   r4300->new_dynarec_hot_state.pending_exception = 0;
-  unsigned int shift = hshift(*r4300_address(r4300));
-  *r4300_wword(r4300) <<= shift;
-  *r4300_wmask(r4300) = UINT32_C(0xffff) << shift;
-  r4300_write_aligned_word(r4300, *r4300_address(r4300), *r4300_wword(r4300), *r4300_wmask(r4300));
+  unsigned int shift = hshift(r4300->new_dynarec_hot_state.address);
+  r4300->new_dynarec_hot_state.wword <<= shift;
+  r4300_write_aligned_word(r4300, r4300->new_dynarec_hot_state.address, r4300->new_dynarec_hot_state.wword, UINT32_C(0xffff) << shift);
   r4300->delay_slot = 0;
   r4300->new_dynarec_hot_state.last_count = *r4300_cp0_next_interrupt(&r4300->cp0);
   r4300->new_dynarec_hot_state.cycle_count = r4300_cp0_regs(&r4300->cp0)[CP0_COUNT_REG] - r4300->new_dynarec_hot_state.last_count - diff;
@@ -11209,8 +11198,7 @@ void write_word_new(int pcaddr, int count, int diff)
   r4300->new_dynarec_hot_state.pcaddr = pcaddr&~1;
   r4300->delay_slot = pcaddr & 1;
   r4300->new_dynarec_hot_state.pending_exception = 0;
-  *r4300_wmask(r4300) = UINT32_C(0xffffffff);
-  r4300_write_aligned_word(r4300, *r4300_address(r4300), *r4300_wword(r4300), *r4300_wmask(r4300));
+  r4300_write_aligned_word(r4300, r4300->new_dynarec_hot_state.address, r4300->new_dynarec_hot_state.wword, UINT32_C(0xffffffff));
   r4300->delay_slot = 0;
   r4300->new_dynarec_hot_state.last_count = *r4300_cp0_next_interrupt(&r4300->cp0);
   r4300->new_dynarec_hot_state.cycle_count = r4300_cp0_regs(&r4300->cp0)[CP0_COUNT_REG] - r4300->new_dynarec_hot_state.last_count - diff;
@@ -11224,7 +11212,7 @@ void write_dword_new(int pcaddr, int count, int diff)
   r4300->delay_slot = pcaddr & 1;
   r4300->new_dynarec_hot_state.pending_exception = 0;
   /* NOTE: in dynarec, we only need an all-one mask */
-  r4300_write_aligned_dword(r4300, *r4300_address(r4300), *r4300_wdword(r4300), ~UINT64_C(0));
+  r4300_write_aligned_dword(r4300, r4300->new_dynarec_hot_state.address, r4300->new_dynarec_hot_state.wdword, ~UINT64_C(0));
   r4300->delay_slot = 0;
   r4300->new_dynarec_hot_state.last_count = *r4300_cp0_next_interrupt(&r4300->cp0);
   r4300->new_dynarec_hot_state.cycle_count = r4300_cp0_regs(&r4300->cp0)[CP0_COUNT_REG] - r4300->new_dynarec_hot_state.last_count - diff;

@@ -1,6 +1,6 @@
 /* * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * *
  *   Mupen64plus - rdp_core.c                                              *
- *   Mupen64Plus homepage: http://code.google.com/p/mupen64plus/           *
+ *   Mupen64Plus homepage: https://mupen64plus.org/                        *
  *   Copyright (C) 2014 Bobby Smiles                                       *
  *                                                                         *
  *   This program is free software; you can redistribute it and/or modify  *
@@ -24,7 +24,6 @@
 #include <string.h>
 
 #include "device/memory/memory.h"
-#include "device/r4300/r4300_core.h"
 #include "device/rcp/mi/mi_controller.h"
 #include "device/rcp/rsp/rsp_core.h"
 #include "plugin/plugin.h"
@@ -32,11 +31,11 @@
 static void update_dpc_status(struct rdp_core* dp, uint32_t w)
 {
     /* clear / set xbus_dmem_dma */
-    if (w & DPC_STATUS_CLR_XBUS_DMEM_DMA) dp->dpc_regs[DPC_STATUS_REG] &= ~DPC_STATUS_XBUS_DMEM_DMA;
-    if (w & DPC_STATUS_SET_XBUS_DMEM_DMA) dp->dpc_regs[DPC_STATUS_REG] |= DPC_STATUS_XBUS_DMEM_DMA;
+    if (w & DPC_CLR_XBUS_DMEM_DMA) dp->dpc_regs[DPC_STATUS_REG] &= ~DPC_STATUS_XBUS_DMEM_DMA;
+    if (w & DPC_SET_XBUS_DMEM_DMA) dp->dpc_regs[DPC_STATUS_REG] |= DPC_STATUS_XBUS_DMEM_DMA;
 
     /* clear / set freeze */
-    if (w & DPC_STATUS_CLR_FREEZE)
+    if (w & DPC_CLR_FREEZE)
     {
         dp->dpc_regs[DPC_STATUS_REG] &= ~DPC_STATUS_FREEZE;
 
@@ -46,11 +45,14 @@ static void update_dpc_status(struct rdp_core* dp, uint32_t w)
             gfx.updateScreen();
         dp->do_on_unfreeze = 0;
     }
-    if (w & DPC_STATUS_SET_FREEZE) dp->dpc_regs[DPC_STATUS_REG] |= DPC_STATUS_FREEZE;
+    if (w & DPC_SET_FREEZE) dp->dpc_regs[DPC_STATUS_REG] |= DPC_STATUS_FREEZE;
 
     /* clear / set flush */
-    if (w & DPC_STATUS_CLR_FLUSH) dp->dpc_regs[DPC_STATUS_REG] &= ~DPC_STATUS_FLUSH;
-    if (w & DPC_STATUS_SET_FLUSH) dp->dpc_regs[DPC_STATUS_REG] |= DPC_STATUS_FLUSH;
+    if (w & DPC_CLR_FLUSH) dp->dpc_regs[DPC_STATUS_REG] &= ~DPC_STATUS_FLUSH;
+    if (w & DPC_SET_FLUSH) dp->dpc_regs[DPC_STATUS_REG] |= DPC_STATUS_FLUSH;
+
+    /* clear clock counter */
+    if (w & DPC_CLR_CLOCK_CTR) dp->dpc_regs[DPC_CLOCK_REG] = 0;
 }
 
 
@@ -71,6 +73,8 @@ void poweron_rdp(struct rdp_core* dp)
 {
     memset(dp->dpc_regs, 0, DPC_REGS_COUNT*sizeof(uint32_t));
     memset(dp->dps_regs, 0, DPS_REGS_COUNT*sizeof(uint32_t));
+    dp->dpc_regs[DPC_STATUS_REG] |= DPC_STATUS_START_GCLK;
+
     dp->do_on_unfreeze = 0;
 
     poweron_fb(&dp->fb);
@@ -108,8 +112,10 @@ void write_dpc_regs(void* opaque, uint32_t address, uint32_t value, uint32_t mas
     {
     case DPC_START_REG:
         dp->dpc_regs[DPC_CURRENT_REG] = dp->dpc_regs[DPC_START_REG];
+        dp->dpc_regs[DPC_STATUS_REG] |= DPC_STATUS_START_VALID;
         break;
     case DPC_END_REG:
+        dp->dpc_regs[DPC_STATUS_REG] |= DPC_STATUS_END_VALID;
         gfx.processRDPList();
         signal_rcp_interrupt(dp->mi, MI_INTR_DP);
         break;

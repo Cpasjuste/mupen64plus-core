@@ -225,10 +225,7 @@
     <ClCompile Include="..\..\src\device\r4300\cp1.c">
       <Filter>device\r4300</Filter>
     </ClCompile>
-    <ClCompile Include="..\..\src\device\r4300\empty_dynarec.c">
-      <Filter>device\r4300</Filter>
-    </ClCompile>
-    <ClCompile Include="..\..\src\device\r4300\exception.c">
+    <ClCompile Include="..\..\src\device\r4300\idec.c">
       <Filter>device\r4300</Filter>
     </ClCompile>
     <ClCompile Include="..\..\src\device\r4300\interrupt.c">
@@ -518,19 +515,13 @@
     <ClInclude Include="..\..\src\device\r4300\cp1.h">
       <Filter>device\r4300</Filter>
     </ClInclude>
-    <ClInclude Include="..\..\src\device\r4300\exception.h">
-      <Filter>device\r4300</Filter>
-    </ClInclude>
     <ClInclude Include="..\..\src\device\r4300\fpu.h">
       <Filter>device\r4300</Filter>
     </ClInclude>
+    <ClInclude Include="..\..\src\device\r4300\idec.h">
+      <Filter>device\r4300</Filter>
+    </ClInclude>
     <ClInclude Include="..\..\src\device\r4300\interrupt.h">
-      <Filter>device\r4300</Filter>
-    </ClInclude>
-    <ClInclude Include="..\..\src\device\r4300\macros.h">
-      <Filter>device\r4300</Filter>
-    </ClInclude>
-    <ClInclude Include="..\..\src\device\r4300\ops.h">
       <Filter>device\r4300</Filter>
     </ClInclude>
     <ClInclude Include="..\..\src\device\r4300\pure_interp.h">
@@ -540,9 +531,6 @@
       <Filter>device\r4300</Filter>
     </ClInclude>
     <ClInclude Include="..\..\src\device\r4300\recomp.h">
-      <Filter>device\r4300</Filter>
-    </ClInclude>
-    <ClInclude Include="..\..\src\device\r4300\recomph.h">
       <Filter>device\r4300</Filter>
     </ClInclude>
     <ClInclude Include="..\..\src\device\r4300\tlb.h">
@@ -597,9 +585,6 @@
       <Filter>debugger</Filter>
     </ClInclude>
     <ClInclude Include="..\..\src\debugger\dbg_memory.h">
-      <Filter>debugger</Filter>
-    </ClInclude>
-    <ClInclude Include="..\..\src\debugger\dbg_types.h">
       <Filter>debugger</Filter>
     </ClInclude>
     <ClInclude Include="..\..\src\device\r4300\recomp_types.h">
@@ -707,6 +692,9 @@
   </ItemGroup>
   <ItemGroup>
     <None Include="..\..\src\device\r4300\mips_instructions.def">
+      <Filter>device\r4300</Filter>
+    </None>
+    <None Include="..\..\src\device\r4300\opcodes.md">
       <Filter>device\r4300</Filter>
     </None>
     <None Include="..\..\src\device\r4300\new_dynarec\arm\linkage_arm.S">

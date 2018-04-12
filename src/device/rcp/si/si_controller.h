@@ -1,6 +1,6 @@
 /* * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * *
  *   Mupen64plus - si_controller.h                                         *
- *   Mupen64Plus homepage: http://code.google.com/p/mupen64plus/           *
+ *   Mupen64Plus homepage: https://mupen64plus.org/                        *
  *   Copyright (C) 2014 Bobby Smiles                                       *
  *                                                                         *
  *   This program is free software; you can redistribute it and/or modify  *
@@ -54,6 +54,8 @@ struct si_controller
     uint32_t regs[SI_REGS_COUNT];
     unsigned char dma_dir;
 
+    unsigned int dma_duration;
+
     struct mi_controller* mi;
     struct pif* pif;
     struct ri_controller* ri;
@@ -66,6 +68,7 @@ static osal_inline uint32_t si_reg(uint32_t address)
 
 
 void init_si(struct si_controller* si,
+             unsigned int dma_duration,
              struct mi_controller* mi,
              struct pif* pif,
              struct ri_controller* ri);

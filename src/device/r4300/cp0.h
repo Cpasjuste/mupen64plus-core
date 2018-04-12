@@ -1,6 +1,6 @@
 /* * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * *
  *   Mupen64plus - cp0.h                                                   *
- *   Mupen64Plus homepage: http://code.google.com/p/mupen64plus/           *
+ *   Mupen64Plus homepage: https://mupen64plus.org/                        *
  *   Copyright (C) 2002 Hacktarux                                          *
  *                                                                         *
  *   This program is free software; you can redistribute it and/or modify  *
@@ -168,6 +168,11 @@ struct interrupt_handler
 
 enum { CP0_INTERRUPT_HANDLERS_COUNT = 12 };
 
+enum {
+    INTR_UNSAFE_R4300 = 0x01,
+    INTR_UNSAFE_RSP = 0x02,
+};
+
 struct cp0
 {
 #if NEW_DYNAREC != NEW_DYNAREC_ARM
@@ -177,7 +182,7 @@ struct cp0
 
     /* set to avoid savestates/reset if state may be inconsistent
      * (e.g. in the middle of an instruction) */
-    int interrupt_unsafe_state;
+    unsigned int interrupt_unsafe_state;
 
     struct interrupt_queue q;
 #if NEW_DYNAREC != NEW_DYNAREC_ARM
@@ -200,6 +205,16 @@ struct cp0
     struct tlb tlb;
 };
 
+#if NEW_DYNAREC != NEW_DYNAREC_ARM
+#define R4300_CP0_REGS_OFFSET (\
+    offsetof(struct r4300_core, cp0) + \
+    offsetof(struct cp0, regs))
+#else
+#define R4300_CP0_REGS_OFFSET (\
+    offsetof(struct r4300_core, new_dynarec_hot_state) + \
+    offsetof(struct new_dynarec_hot_state, cp0_regs))
+#endif
+
 void init_cp0(struct cp0* cp0, unsigned int count_per_op, struct new_dynarec_hot_state* new_dynarec_hot_state, const struct interrupt_handler* interrupt_handlers);
 void poweron_cp0(struct cp0* cp0);
 
@@ -210,6 +225,9 @@ unsigned int* r4300_cp0_next_interrupt(struct cp0* cp0);
 int check_cop1_unusable(struct r4300_core* r4300);
 
 void cp0_update_count(struct r4300_core* r4300);
+
+void TLB_refill_exception(struct r4300_core* r4300, uint32_t address, int w);
+void exception_general(struct r4300_core* r4300);
 
 #endif /* M64P_DEVICE_R4300_CP0_H */
 

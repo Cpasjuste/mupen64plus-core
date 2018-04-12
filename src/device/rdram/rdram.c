@@ -1,6 +1,6 @@
 /* * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * *
  *   Mupen64plus - rdram.c                                                 *
- *   Mupen64Plus homepage: http://code.google.com/p/mupen64plus/           *
+ *   Mupen64Plus homepage: https://mupen64plus.org/                        *
  *   Copyright (C) 2014 Bobby Smiles                                       *
  *                                                                         *
  *   This program is free software; you can redistribute it and/or modify  *
@@ -116,8 +116,10 @@ static void map_corrupt_rdram(struct rdram* rdram, int corrupt)
     mapping.handler.write32 = write_rdram_dram;
 
     apply_mem_mapping(rdram->r4300->mem, &mapping);
+#ifndef NEW_DYNAREC
     rdram->r4300->recomp.fast_memory = (corrupt) ? 0 : 1;
     invalidate_r4300_cached_code(rdram->r4300, 0, 0);
+#endif
 }
 
 

@@ -1,6 +1,6 @@
 /* * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * *
  *   Mupen64plus - new_dynarec.h                                           *
- *   Mupen64Plus homepage: http://code.google.com/p/mupen64plus/           *
+ *   Mupen64Plus homepage: https://mupen64plus.org/                        *
  *   Copyright (C) 2002 Hacktarux                                          *
  *                                                                         *
  *   This program is free software; you can redistribute it and/or modify  *
@@ -46,9 +46,15 @@ struct new_dynarec_hot_state
     int last_count;
     int pending_exception;
     int pcaddr;
+    uint32_t address;
     uint64_t rdword;
+    uint64_t wdword;
+    uint32_t wword;
     int branch_target;
     struct precomp_instr fake_pc;
+    int64_t rs;
+    int64_t rt;
+    int64_t rd;
     unsigned int mini_ht[32][2];
     unsigned char restore_candidate[512];
     unsigned int memory_map[1048576];
@@ -65,7 +71,6 @@ struct new_dynarec_hot_state
     char* invc_ptr;
     uint32_t address;
     uint64_t rdword;
-    uint32_t wmask;
     uint64_t wdword;
     uint32_t wword;
     uint32_t fcr0;
@@ -80,6 +85,9 @@ struct new_dynarec_hot_state
     int branch_target;
     struct precomp_instr* pc;
     struct precomp_instr fake_pc;
+    int64_t rs;
+    int64_t rt;
+    int64_t rd;
     int ram_offset;
     unsigned int mini_ht[32][2];
     unsigned char restore_candidate[512];

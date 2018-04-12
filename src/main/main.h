@@ -1,6 +1,6 @@
 /* * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * *
  *   Mupen64plus - main.h                                                  *
- *   Mupen64Plus homepage: http://code.google.com/p/mupen64plus/           *
+ *   Mupen64Plus homepage: https://mupen64plus.org/                        *
  *   Copyright (C) 2012 CasualJames                                        *
  *   Copyright (C) 2002 Blight                                             *
  *                                                                         *
@@ -26,6 +26,7 @@
 #include <stdint.h>
 
 #include "api/m64p_types.h"
+#include "main/cheat.h"
 #include "device/device.h"
 #include "osal/preproc.h"
 
@@ -35,6 +36,8 @@ extern m64p_handle g_CoreConfig;
 extern int g_MemHasBeenBSwapped;
 extern int g_EmulatorRunning;
 extern int g_rom_pause;
+
+extern struct cheat_ctx g_cheat_ctx;
 
 extern void* g_mem_base;
 

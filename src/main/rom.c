@@ -1,6 +1,6 @@
 /* * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * *
  *   Mupen64plus - rom.c                                                   *
- *   Mupen64Plus homepage: http://code.google.com/p/mupen64plus/           *
+ *   Mupen64Plus homepage: https://mupen64plus.org/                        *
  *   Copyright (C) 2008 Tillin9                                            *
  *   Copyright (C) 2002 Hacktarux                                          *
  *                                                                         *
@@ -36,7 +36,6 @@
 #include "api/m64p_config.h"
 #include "api/m64p_types.h"
 #include "device/device.h"
-#include "device/memory/memory.h"
 #include "main.h"
 #include "md5.h"
 #include "osal/preproc.h"
@@ -50,6 +49,8 @@
 enum { DEFAULT_COUNT_PER_OP = 2 };
 /* by default, extra mem is enabled */
 enum { DEFAULT_DISABLE_EXTRA_MEM = 0 };
+/* Default SI DMA duration */
+enum { DEFAULT_SI_DMA_DURATION = 0x900 };
 
 static romdatabase_entry* ini_search_by_md5(md5_byte_t* md5);
 
@@ -165,6 +166,7 @@ m64p_error open_rom(const unsigned char* romimage, unsigned int size)
     ROM_PARAMS.systemtype = rom_country_code_to_system_type(ROM_HEADER.Country_code);
     ROM_PARAMS.countperop = DEFAULT_COUNT_PER_OP;
     ROM_PARAMS.disableextramem = DEFAULT_DISABLE_EXTRA_MEM;
+    ROM_PARAMS.sidmaduration = DEFAULT_SI_DMA_DURATION;
     ROM_PARAMS.cheats = NULL;
 
     memcpy(ROM_PARAMS.headername, ROM_HEADER.Name, 20);
@@ -173,7 +175,7 @@ m64p_error open_rom(const unsigned char* romimage, unsigned int size)
 
     /* Look up this ROM in the .ini file and fill in goodname, etc */
     if ((entry=ini_search_by_md5(digest)) != NULL ||
-        (entry=ini_search_by_crc(sl(ROM_HEADER.CRC1),sl(ROM_HEADER.CRC2))) != NULL)
+        (entry=ini_search_by_crc(tohl(ROM_HEADER.CRC1),tohl(ROM_HEADER.CRC2))) != NULL)
     {
         strncpy(ROM_SETTINGS.goodname, entry->goodname, 255);
         ROM_SETTINGS.goodname[255] = '\0';
@@ -185,6 +187,7 @@ m64p_error open_rom(const unsigned char* romimage, unsigned int size)
         ROM_SETTINGS.mempak = entry->mempak;
         ROM_PARAMS.countperop = entry->countperop;
         ROM_PARAMS.disableextramem = entry->disableextramem;
+        ROM_PARAMS.sidmaduration = entry->sidmaduration;
         ROM_PARAMS.cheats = entry->cheats;
     }
     else
@@ -193,12 +196,13 @@ m64p_error open_rom(const unsigned char* romimage, unsigned int size)
         strcat(ROM_SETTINGS.goodname, " (unknown rom)");
         ROM_SETTINGS.savetype = NONE;
         ROM_SETTINGS.status = 0;
-        ROM_SETTINGS.players = 0;
-        ROM_SETTINGS.rumble = 0;
+        ROM_SETTINGS.players = 4;
+        ROM_SETTINGS.rumble = 1;
         ROM_SETTINGS.transferpak = 0;
-        ROM_SETTINGS.mempak = 0;
+        ROM_SETTINGS.mempak = 1;
         ROM_PARAMS.countperop = DEFAULT_COUNT_PER_OP;
         ROM_PARAMS.disableextramem = DEFAULT_DISABLE_EXTRA_MEM;
+        ROM_PARAMS.sidmaduration = DEFAULT_SI_DMA_DURATION;
         ROM_PARAMS.cheats = NULL;
     }
 
@@ -207,19 +211,19 @@ m64p_error open_rom(const unsigned char* romimage, unsigned int size)
     DebugMessage(M64MSG_INFO, "Name: %s", ROM_HEADER.Name);
     imagestring(imagetype, buffer);
     DebugMessage(M64MSG_INFO, "MD5: %s", ROM_SETTINGS.MD5);
-    DebugMessage(M64MSG_INFO, "CRC: %08" PRIX32 " %08" PRIX32, sl(ROM_HEADER.CRC1), sl(ROM_HEADER.CRC2));
+    DebugMessage(M64MSG_INFO, "CRC: %08" PRIX32 " %08" PRIX32, tohl(ROM_HEADER.CRC1), tohl(ROM_HEADER.CRC2));
     DebugMessage(M64MSG_INFO, "Imagetype: %s", buffer);
     DebugMessage(M64MSG_INFO, "Rom size: %d bytes (or %d Mb or %d Megabits)", g_rom_size, g_rom_size/1024/1024, g_rom_size/1024/1024*8);
-    DebugMessage(M64MSG_VERBOSE, "ClockRate = %" PRIX32, sl(ROM_HEADER.ClockRate));
-    DebugMessage(M64MSG_INFO, "Version: %" PRIX32, sl(ROM_HEADER.Release));
-    if(sl(ROM_HEADER.Manufacturer_ID) == 'N')
+    DebugMessage(M64MSG_VERBOSE, "ClockRate = %" PRIX32, tohl(ROM_HEADER.ClockRate));
+    DebugMessage(M64MSG_INFO, "Version: %" PRIX32, tohl(ROM_HEADER.Release));
+    if(tohl(ROM_HEADER.Manufacturer_ID) == 'N')
         DebugMessage(M64MSG_INFO, "Manufacturer: Nintendo");
     else
-        DebugMessage(M64MSG_INFO, "Manufacturer: %" PRIX32, sl(ROM_HEADER.Manufacturer_ID));
+        DebugMessage(M64MSG_INFO, "Manufacturer: %" PRIX32, tohl(ROM_HEADER.Manufacturer_ID));
     DebugMessage(M64MSG_VERBOSE, "Cartridge_ID: %" PRIX16, ROM_HEADER.Cartridge_ID);
     countrycodestring(ROM_HEADER.Country_code, buffer);
     DebugMessage(M64MSG_INFO, "Country: %s", buffer);
-    DebugMessage(M64MSG_VERBOSE, "PC = %" PRIX32, sl(ROM_HEADER.PC));
+    DebugMessage(M64MSG_VERBOSE, "PC = %" PRIX32, tohl(ROM_HEADER.PC));
     DebugMessage(M64MSG_VERBOSE, "Save type: %d", ROM_SETTINGS.savetype);
 
     return M64ERR_SUCCESS;
@@ -355,6 +359,13 @@ static size_t romdatabase_resolve_round(void)
             entry->entry.set_flags |= ROMDATABASE_ENTRY_MEMPAK;
         }
 
+        if (!isset_bitmask(entry->entry.set_flags, ROMDATABASE_ENTRY_SIDMADURATION) &&
+            isset_bitmask(ref->set_flags, ROMDATABASE_ENTRY_SIDMADURATION)) {
+            entry->entry.sidmaduration = ref->sidmaduration;
+            entry->entry.set_flags |= ROMDATABASE_ENTRY_SIDMADURATION;
+        }
+
+
         free(entry->entry.refmd5);
         entry->entry.refmd5 = NULL;
     }
@@ -442,13 +453,14 @@ void romdatabase_open(void)
             search->entry.crc2 = 0;
             search->entry.status = 0; /* Set default to 0 stars. */
             search->entry.savetype = 0;
-            search->entry.players = 0;
-            search->entry.rumble = 0;
+            search->entry.players = 4;
+            search->entry.rumble = 1;
             search->entry.countperop = DEFAULT_COUNT_PER_OP;
             search->entry.disableextramem = DEFAULT_DISABLE_EXTRA_MEM;
             search->entry.cheats = NULL;
             search->entry.transferpak = 0;
-            search->entry.mempak = 0;
+            search->entry.mempak = 1;
+            search->entry.sidmaduration = DEFAULT_SI_DMA_DURATION;
             search->entry.set_flags = ROMDATABASE_ENTRY_NONE;
 
             search->next_entry = NULL;
@@ -622,6 +634,15 @@ void romdatabase_open(void)
                     search->entry.set_flags |= ROMDATABASE_ENTRY_MEMPAK;
                 } else {
                     DebugMessage(M64MSG_WARNING, "ROM Database: Invalid mempak string on line %i", lineno);
+                }
+            }
+            else if(!strcmp(l.name, "SiDmaDuration"))
+            {
+                if (string_to_int(l.value, &value) && value >= 0 && value <= 0x10000) {
+                    search->entry.sidmaduration = value;
+                    search->entry.set_flags |= ROMDATABASE_ENTRY_SIDMADURATION;
+                } else {
+                    DebugMessage(M64MSG_WARNING, "ROM Database: Invalid SiDmaDuration on line %i", lineno);
                 }
             }
             else

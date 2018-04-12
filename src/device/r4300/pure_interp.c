@@ -1,6 +1,6 @@
 /* * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * *
  *   Mupen64plus - pure_interp.c                                           *
- *   Mupen64Plus homepage: http://code.google.com/p/mupen64plus/           *
+ *   Mupen64Plus homepage: https://mupen64plus.org/                        *
  *   Copyright (C) 2015 Nebuleon <nebuleon.fumika@gmail.com>               *
  *                                                                         *
  *   This program is free software; you can redistribute it and/or modify  *
@@ -19,6 +19,8 @@
  *   51 Franklin Street, Fifth Floor, Boston, MA 02110-1301, USA.          *
  * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * */
 
+#include "pure_interp.h"
+
 #include <stdint.h>
 
 #define __STDC_FORMAT_MACROS
@@ -27,19 +29,11 @@
 #include "api/callbacks.h"
 #include "api/debugger.h"
 #include "api/m64p_types.h"
-#include "device/memory/memory.h"
-/* TLBWrite requires invalid_code and blocks from cached_interp.h, but only if
- * (at run time) the active core is not the Pure Interpreter. */
-#include "device/r4300/cached_interp.h"
-#include "device/r4300/cp1.h"
-#include "device/r4300/exception.h"
-#include "device/r4300/interrupt.h"
-#include "device/r4300/tlb.h"
+#include "device/r4300/r4300_core.h"
 #include "osal/preproc.h"
 
 #ifdef DBG
 #include "debugger/dbg_debugger.h"
-#include "debugger/dbg_types.h"
 #endif
 
 
@@ -123,11 +117,7 @@ static void InterpretOpcode(struct r4300_core* r4300);
 	 && ((addr) & UINT32_C(0x0FFFFFFF)) != UINT32_C(0x0FFFFFFC) \
 	 && *fast_mem_access((r4300), (addr) + 4) == 0)
 
-#define SE8(a) ((int64_t) ((int8_t) (a)))
-#define SE16(a) ((int64_t) ((int16_t) (a)))
-#define SE32(a) ((int64_t) ((int32_t) (a)))
-
-/* These macros are like those in macros.h, but they parse opcode fields. */
+/* These macros parse opcode fields. */
 #define rrt r4300_regs(r4300)[RT_OF(op)]
 #define rrd r4300_regs(r4300)[RD_OF(op)]
 #define rfs FS_OF(op)

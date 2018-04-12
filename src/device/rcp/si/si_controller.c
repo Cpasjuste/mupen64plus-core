@@ -1,6 +1,6 @@
 /* * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * *
  *   Mupen64plus - si_controller.c                                         *
- *   Mupen64Plus homepage: http://code.google.com/p/mupen64plus/           *
+ *   Mupen64Plus homepage: https://mupen64plus.org/                        *
  *   Copyright (C) 2014 Bobby Smiles                                       *
  *                                                                         *
  *   This program is free software; you can redistribute it and/or modify  *
@@ -31,6 +31,7 @@
 #include "device/rcp/mi/mi_controller.h"
 #include "device/rcp/ri/ri_controller.h"
 #include "device/rdram/rdram.h"
+#include "osal/preproc.h"
 
 enum
 {
@@ -69,12 +70,12 @@ static void copy_pif_rdram(struct si_controller* si)
 
     if (si->dma_dir == SI_DMA_WRITE) {
         for(i = 0; i < (PIF_RAM_SIZE / 4); ++i) {
-            pif_ram[i] = sl(dram[i]);
+            pif_ram[i] = fromhl(dram[i]);
         }
     }
     else if (si->dma_dir == SI_DMA_READ) {
         for(i = 0; i < (PIF_RAM_SIZE / 4); ++i) {
-            dram[i] = sl(pif_ram[i]);
+            dram[i] = tohl(pif_ram[i]);
         }
     }
 }
@@ -90,7 +91,7 @@ static void dma_si_write(struct si_controller* si)
 
     cp0_update_count(si->mi->r4300);
     si->regs[SI_STATUS_REG] |= SI_STATUS_DMA_BUSY;
-    add_interrupt_event(&si->mi->r4300->cp0, SI_INT, 0x900 + add_random_interrupt_time(si->mi->r4300));
+    add_interrupt_event(&si->mi->r4300->cp0, SI_INT, si->dma_duration + add_random_interrupt_time(si->mi->r4300));
 }
 
 static void dma_si_read(struct si_controller* si)
@@ -104,14 +105,16 @@ static void dma_si_read(struct si_controller* si)
 
     cp0_update_count(si->mi->r4300);
     si->regs[SI_STATUS_REG] |= SI_STATUS_DMA_BUSY;
-    add_interrupt_event(&si->mi->r4300->cp0, SI_INT, 0x900 + add_random_interrupt_time(si->mi->r4300));
+    add_interrupt_event(&si->mi->r4300->cp0, SI_INT, si->dma_duration + add_random_interrupt_time(si->mi->r4300));
 }
 
 void init_si(struct si_controller* si,
+             unsigned int dma_duration,
              struct mi_controller* mi,
              struct pif* pif,
              struct ri_controller* ri)
 {
+    si->dma_duration = dma_duration;
     si->mi = mi;
     si->pif = pif;
     si->ri = ri;

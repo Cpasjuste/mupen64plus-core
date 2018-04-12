@@ -1,6 +1,6 @@
 #/* * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * *
 # *   Mupen64plus - Makefile                                                *
-# *   Mupen64Plus homepage: http://code.google.com/p/mupen64plus/           *
+# *   Mupen64Plus homepage: https://mupen64plus.org/                        *
 # *   Copyright (C) 2008-2009 Richard Goedeken                              *
 # *   Copyright (C) 2007-2008 DarkJeztr Tillin9                             *
 # *                                                                         *
@@ -51,7 +51,7 @@ ifeq ("$(patsubst MINGW%,MINGW,$(UNAME))","MINGW")
   PIC = 0
 endif
 ifeq ("$(OS)","NONE")
-  $(error OS type "$(UNAME)" not supported.  Please file bug report at 'http://code.google.com/p/mupen64plus/issues')
+  $(error OS type "$(UNAME)" not supported.  Please file bug report at 'https://github.com/mupen64plus/mupen64plus-core/issues')
 endif
 
 # detect system architecture
@@ -123,13 +123,13 @@ ifneq ("$(filter mips,$(HOST_CPU))","")
   $(warning Architecture "$(HOST_CPU)" not officially supported.')
 endif
 ifeq ("$(CPU)","NONE")
-  $(error CPU type "$(HOST_CPU)" not supported.  Please file bug report at 'http://code.google.com/p/mupen64plus/issues')
+  $(error CPU type "$(HOST_CPU)" not supported.  Please file bug report at 'https://github.com/mupen64plus/mupen64plus-core/issues')
 endif
 
 # base CFLAGS, LDLIBS, and LDFLAGS
 OPTFLAGS ?= -O3 -flto
 WARNFLAGS ?= -Wall
-CFLAGS += $(OPTFLAGS) $(WARNFLAGS) -ffast-math -fno-strict-aliasing -fvisibility=hidden -I../../src -I../../src/asm_defines -DM64P_PARALLEL
+CFLAGS += -ffast-math -fno-strict-aliasing -fvisibility=hidden -I../../src -I../../src/asm_defines -DM64P_PARALLEL
 CXXFLAGS += -fvisibility-inlines-hidden
 LDLIBS +=  -lm
 
@@ -353,14 +353,15 @@ CC        = $(CROSS_COMPILE)gcc
 CXX       = $(CROSS_COMPILE)g++
 STRINGS   = $(CROSS_COMPILE)strings
 AS        = nasm
+TR       ?= tr
 RM       ?= rm -f
 INSTALL  ?= install
 MKDIR    ?= mkdir -p
 AWK      ?= awk
-COMPILE.c = $(Q_CC)$(CC) $(CFLAGS) $(CPPFLAGS) $(TARGET_ARCH) -c
-COMPILE.cc = $(Q_CXX)$(CXX) $(CXXFLAGS) $(CPPFLAGS) $(TARGET_ARCH) -c
+COMPILE.c = $(Q_CC)$(CC) $(OPTFLAGS) $(WARNFLAGS) $(CFLAGS) $(CPPFLAGS) $(TARGET_ARCH) -c
+COMPILE.cc = $(Q_CXX)$(CXX) $(OPTFLAGS) $(WARNFLAGS) $(CXXFLAGS) $(CPPFLAGS) $(TARGET_ARCH) -c
 COMPILE.as = $(Q_AS)$(AS) $(ASFLAGS)
-LINK.o = $(Q_LD)$(CXX) $(CXXFLAGS) $(LDFLAGS) $(TARGET_ARCH)
+LINK.o = $(Q_LD)$(CXX) $(OPTFLAGS) $(WARNFLAGS) $(CXXFLAGS) $(LDFLAGS) $(TARGET_ARCH)
 
 ifeq ($(OS),OSX)
   LDCONFIG ?= true  # no 'ldconfig' under OSX
@@ -385,6 +386,7 @@ ifeq ($(PROFILE), 1)
 else
   ifeq ($(DEBUG), 1)
     CFLAGS += -g
+    OPTFLAGS = -O0
     INSTALL_STRIP_FLAG ?= 
   else
     CFLAGS += -DNDEBUG
@@ -466,11 +468,10 @@ SOURCE = \
     $(SRCDIR)/device/r4300/cached_interp.c \
     $(SRCDIR)/device/r4300/cp0.c \
     $(SRCDIR)/device/r4300/cp1.c \
-    $(SRCDIR)/device/r4300/exception.c \
+    $(SRCDIR)/device/r4300/idec.c \
     $(SRCDIR)/device/r4300/interrupt.c \
     $(SRCDIR)/device/r4300/pure_interp.c \
     $(SRCDIR)/device/r4300/r4300_core.c \
-    $(SRCDIR)/device/r4300/recomp.c \
     $(SRCDIR)/device/r4300/tlb.c \
     $(SRCDIR)/device/rcp/ai/ai_controller.c \
     $(SRCDIR)/device/rcp/mi/mi_controller.c \
@@ -503,6 +504,10 @@ ifeq ("$(OS)","MINGW")
 SOURCE += \
     $(SRCDIR)/osal/dynamiclib_win32.c \
     $(SRCDIR)/osal/files_win32.c
+else ifeq   ("$(OS)","OSX")
+SOURCE += \
+    $(SRCDIR)/osal/dynamiclib_unix.c \
+    $(SRCDIR)/osal/files_macos.c
 else
 SOURCE += \
     $(SRCDIR)/osal/dynamiclib_unix.c \
@@ -559,17 +564,15 @@ ifneq ($(DYNAREC), )
     endif
 
     SOURCE += \
-      $(SRCDIR)/device/r4300/empty_dynarec.c \
       $(SRCDIR)/device/r4300/new_dynarec/new_dynarec.c
   else
     SOURCE += \
+      $(SRCDIR)/device/r4300/recomp.c \
       $(SRCDIR)/device/r4300/$(DYNAREC)/assemble.c \
       $(SRCDIR)/device/r4300/$(DYNAREC)/dynarec.c \
       $(SRCDIR)/device/r4300/$(DYNAREC)/regcache.c \
       $(SRCDIR)/device/r4300/$(DYNAREC)/dyna_start.asm
   endif
-else
-  SOURCE += $(SRCDIR)/device/r4300/empty_dynarec.c
 endif
 
 ifeq ($(LIRC), 1)
@@ -597,6 +600,16 @@ ifeq ($(DEBUGGER), 1)
     $(SRCDIR)/debugger/dbg_memory.c \
     $(SRCDIR)/debugger/dbg_breakpoints.c
   LDLIBS += -lopcodes -lbfd
+
+  # UGLY libopcodes version check (we check for > 2.28)
+  LIBOPCODES_VERSION := $(shell $(STRINGS) --version | head -n1 | rev | cut -d ' ' -f1 | rev)
+  LIBOPCODES_MAJOR := $(shell echo $(LIBOPCODES_VERSION) | cut -f1 -d.)
+  LIBOPCODES_MINOR := $(shell echo $(LIBOPCODES_VERSION) | cut -f2 -d.)
+  LIBOPCODES_POINT := $(shell echo $(LIBOPCODES_VERSION) | cut -f3 -d.)
+  LIBOPCODES_GE_2_29 := $(shell [ $(LIBOPCODES_MAJOR) -gt 2 -o \( $(LIBOPCODES_MAJOR) -eq 2 -a $(LIBOPCODES_MINOR) -ge 29 \) -o \( $(LIBOPCODES_MAJOR) -eq 2 -a $(LIBOPCODES_MINOR) -eq 28 -a $(LIBOPCODES_POINT) -ge 1 \) ] && echo true)
+  ifeq ($(LIBOPCODES_GE_2_29),true)
+    CFLAGS += -DUSE_LIBOPCODES_GE_2_29
+  endif
 endif
 
 # generate a list of object files to build, make a temporary directory for them
@@ -688,7 +701,7 @@ $(ASM_DEFINES_OBJ): $(SRCDIR)/asm_defines/asm_defines.c
 # Script hackery for generating ASM include files for the new dynarec assembly code
 $(SRCDIR)/asm_defines/asm_defines_gas.h: $(SRCDIR)/asm_defines/asm_defines_nasm.h
 $(SRCDIR)/asm_defines/asm_defines_nasm.h: $(ASM_DEFINES_OBJ) ../../tools/gen_asm_defines.awk
-	$(STRINGS) "$<" | $(AWK) -v dest_dir="$(SRCDIR)/asm_defines" -f ../../tools/gen_asm_defines.awk
+	$(STRINGS) "$<" | $(TR) -d '\r' | $(AWK) -v dest_dir="$(SRCDIR)/asm_defines" -f ../../tools/gen_asm_defines.awk
 
 # standard build rules
 $(OBJDIR)/%.o: $(SRCDIR)/%.asm $(SRCDIR)/asm_defines/asm_defines_nasm.h
